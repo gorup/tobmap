@@ -1,0 +1,19 @@
+[package]
+name = "tobmap"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+osmpbf = "0.3"           # For reading OpenStreetMap PBF files
+reqwest = { version = "0.11", features = ["blocking"] }  # For downloading OSM data
+flatbuffers = "24.3.25"  # For FlatBuffers serialization
+s2 = "0.0.12"            # For S2 geometry
+clap = { version = "4.4", features = ["derive"] }  # For command line arguments
+anyhow = "1.0"           # For error handling
+sha2 = "0.10"            # For hashing (cache management)
+serde = { version = "1.0", features = ["derive"] }  # For serialization/deserialization
+serde_json = "1.0"       # For JSON parsing/generation
+log = "0.4"              # For logging
+env_logger = "0.10"      # For logging
+uuid = { version = "1.4", features = ["v4"] }  # For generating unique IDs
+chrono = "0.4"           # For date/time handling
