@@ -5,8 +5,11 @@ use s2::cellid::CellID;
 use s2::latlng::LatLng;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use uuid::Uuid;
+use flatbuffers::FlatBufferBuilder;
 
-use crate::model::{Edge, MapData, Node, TravelMode};
+use crate::model::MapData;
+use crate::generated::tobmap::{TravelMode, Node, Edge, NodeArgs, EdgeArgs, KeyValue, KeyValueArgs};
 
 // Constants for S2 cell handling
 const S2_CELL_LEVEL: u64 = 15; // This level gives cells ~300m across
@@ -83,11 +86,32 @@ pub fn process_osm_file<P: AsRef<Path>>(file_path: P) -> Result<MapData> {
     for &node_id in &intersection_node_ids {
         if let Some(&(lat, lon)) = osm_nodes.get(&node_id) {
             let s2_cell_id = get_s2_cell_id(lat, lon);
-            let node = Node::new(lat as f32, lon as f32, s2_cell_id);
-            graph_nodes.insert(node_id, node.id.clone());
             
+            // Create a new FlatBufferBuilder for this node
+            let mut builder = FlatBufferBuilder::new();
+            let node_id_str = Uuid::new_v4().to_string();
+            let node_id_offset = builder.create_string(&node_id_str);
+            
+            // Create the Node object
+            let args = NodeArgs {
+                id: Some(node_id_offset),
+                s2_cell_id,
+                lat: lat as f32,
+                lng: lon as f32,
+            };
+            
+            let fb_node = Node::create(&mut builder, &args);
+            builder.finish(fb_node, None);
+            
+            // Get the finished buffer
+            let buf = builder.finished_data().to_vec();
+            
+            // Store the node ID for later references
+            graph_nodes.insert(node_id, node_id_str);
+            
+            // Add the buffer to the cell
             let cell = map_data.get_or_create_cell(s2_cell_id);
-            cell.add_node(node);
+            cell.add_node(buf);
         }
     }
     
@@ -148,37 +172,78 @@ fn process_way(
                         if let (Some(source_graph_id), Some(target_graph_id)) = 
                             (graph_nodes.get(&source_id), graph_nodes.get(&node_id)) {
                             
-                            // Create an edge
-                            let mut edge = Edge::new(
-                                source_graph_id.clone(),
-                                target_graph_id.clone(),
-                                way.id as u64,
-                            );
+                            // Create a new FlatBufferBuilder for this edge
+                            let mut builder = FlatBufferBuilder::new();
                             
-                            // Set way name if available
-                            if let Some(name) = way.tags.get("name") {
-                                edge.name = name.clone();
-                            }
+                            // Create string offsets
+                            let edge_id = Uuid::new_v4().to_string();
+                            let edge_id_offset = builder.create_string(&edge_id);
+                            let source_id_offset = builder.create_string(source_graph_id);
+                            let target_id_offset = builder.create_string(target_graph_id);
                             
-                            // Add all points to the edge geometry
+                            // Get the name if available
+                            let name_string = way.tags.get("name").cloned().unwrap_or_else(String::new);
+                            let name_offset = builder.create_string(&name_string);
+                            
+                            // Extract geometry points
+                            let mut geometry_lats = Vec::new();
+                            let mut geometry_lngs = Vec::new();
+                            
                             for &(lat, lon) in &current_path {
-                                edge.add_point(lat, lon);
+                                geometry_lats.push(lat);
+                                geometry_lngs.push(lon);
                             }
                             
-                            // Calculate travel costs based on way type
-                            calculate_travel_costs(&mut edge, way);
+                            let lats_vec = builder.create_vector(&geometry_lats);
+                            let lngs_vec = builder.create_vector(&geometry_lngs);
                             
-                            // Add OSM tags to the edge
+                            // Calculate travel costs
+                            let mut travel_costs = vec![-1.0; 4]; // One for each TravelMode
+                            calculate_travel_costs(&mut travel_costs, way, &geometry_lats, &geometry_lngs);
+                            let costs_vec = builder.create_vector(&travel_costs);
+                            
+                            // Create tags vector
+                            let mut tag_offsets = Vec::new();
                             for (key, value) in &way.tags {
-                                edge.tags.insert(key.clone(), value.clone());
+                                let key_offset = builder.create_string(key);
+                                let value_offset = builder.create_string(value);
+                                
+                                let tag_args = KeyValueArgs {
+                                    key: Some(key_offset),
+                                    value: Some(value_offset),
+                                };
+                                
+                                let tag = KeyValue::create(&mut builder, &tag_args);
+                                tag_offsets.push(tag);
                             }
+                            
+                            let tags_vec = builder.create_vector(&tag_offsets);
+                            
+                            // Create the Edge object
+                            let args = EdgeArgs {
+                                id: Some(edge_id_offset),
+                                source_node_id: Some(source_id_offset),
+                                destination_node_id: Some(target_id_offset),
+                                name: Some(name_offset),
+                                osm_way_id: way.id as u64,
+                                travel_costs: Some(costs_vec),
+                                geometry_lats: Some(lats_vec),
+                                geometry_lngs: Some(lngs_vec),
+                                tags: Some(tags_vec),
+                            };
+                            
+                            let fb_edge = Edge::create(&mut builder, &args);
+                            builder.finish(fb_edge, None);
+                            
+                            // Get the finished buffer
+                            let buf = builder.finished_data().to_vec();
                             
                             // Add the edge to the appropriate cell
                             // For simplicity, use the cell of the source node
                             if let Some(&(source_lat, source_lon)) = osm_nodes.get(&source_id) {
                                 let cell_id = get_s2_cell_id(source_lat, source_lon);
                                 let cell = map_data.get_or_create_cell(cell_id);
-                                cell.add_edge(edge);
+                                cell.add_edge(buf);
                             }
                         }
                     }
@@ -194,7 +259,7 @@ fn process_way(
 }
 
 /// Calculate travel costs for different travel modes
-fn calculate_travel_costs(edge: &mut Edge, way: &OsmWay) {
+fn calculate_travel_costs(travel_costs: &mut Vec<f32>, way: &OsmWay, geometry_lats: &[f32], geometry_lngs: &[f32]) {
     // Default speeds in km/h for different highway types
     let highway_type = way.tags.get("highway").map(|s| s.as_str()).unwrap_or("");
     
@@ -235,11 +300,11 @@ fn calculate_travel_costs(edge: &mut Edge, way: &OsmWay) {
     
     // Calculate edge length
     let mut length = 0.0;
-    for i in 1..edge.geometry_lats.len() {
-        let lat1 = edge.geometry_lats[i-1] as f64;
-        let lon1 = edge.geometry_lngs[i-1] as f64;
-        let lat2 = edge.geometry_lats[i] as f64;
-        let lon2 = edge.geometry_lngs[i] as f64;
+    for i in 1..geometry_lats.len() {
+        let lat1 = geometry_lats[i-1] as f64;
+        let lon1 = geometry_lngs[i-1] as f64;
+        let lat2 = geometry_lats[i] as f64;
+        let lon2 = geometry_lngs[i] as f64;
         
         length += haversine_distance(lat1, lon1, lat2, lon2);
     }
@@ -249,22 +314,22 @@ fn calculate_travel_costs(edge: &mut Edge, way: &OsmWay) {
     
     if car_speed > 0.0 {
         let car_time = (length_km / car_speed) * 3600.0;
-        edge.set_travel_cost(TravelMode::Car, car_time as f32);
+        travel_costs[TravelMode::Car.0 as usize] = car_time as f32;
     }
     
     if bike_speed > 0.0 {
         let bike_time = (length_km / bike_speed) * 3600.0;
-        edge.set_travel_cost(TravelMode::Bike, bike_time as f32);
+        travel_costs[TravelMode::Bike.0 as usize] = bike_time as f32;
     }
     
     if walk_speed > 0.0 {
         let walk_time = (length_km / walk_speed) * 3600.0;
-        edge.set_travel_cost(TravelMode::Walk, walk_time as f32);
+        travel_costs[TravelMode::Walk.0 as usize] = walk_time as f32;
     }
     
     if transit_speed > 0.0 {
         let transit_time = (length_km / transit_speed) * 3600.0;
-        edge.set_travel_cost(TravelMode::Transit, transit_time as f32);
+        travel_costs[TravelMode::Transit.0 as usize] = transit_time as f32;
     }
 }
 
@@ -272,16 +337,14 @@ fn calculate_travel_costs(edge: &mut Edge, way: &OsmWay) {
 fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     const EARTH_RADIUS: f64 = 6371.0; // km
     
-    let lat1 = lat1.to_radians();
-    let lon1 = lon1.to_radians();
-    let lat2 = lat2.to_radians();
-    let lon2 = lon2.to_radians();
+    let lat1_rad = lat1.to_radians();
+    let lat2_rad = lat2.to_radians();
+    let delta_lat = (lat2 - lat1).to_radians();
+    let delta_lon = (lon2 - lon1).to_radians();
     
-    let dlat = lat2 - lat1;
-    let dlon = lon2 - lon1;
-    
-    let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    let a = (delta_lat / 2.0).sin().powi(2) + 
+            lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().asin();
     
     EARTH_RADIUS * c * 1000.0 // Convert to meters
 }

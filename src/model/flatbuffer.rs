@@ -4,11 +4,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use std::collections::HashMap;
+use uuid::Uuid;
 
-use crate::model::{Cell as ModelCell, Edge as ModelEdge, MapData as ModelMapData, Node as ModelNode};
-
-// Import the generated FlatBuffer code
-pub use crate::generated::tobmap;
+use crate::model::{Cell as ModelCell, MapData as ModelMapData};
+use crate::generated::tobmap::{self, Node, Edge, Cell, MapData, NodeArgs, EdgeArgs, KeyValue, KeyValueArgs, CellArgs, MapDataArgs};
 
 /// Convert the map data to a FlatBuffer and write it to a file
 pub fn write_to_file<P: AsRef<Path>>(map_data: &ModelMapData, path: P) -> Result<()> {
@@ -37,7 +36,7 @@ pub fn convert_to_flatbuffer(map_data: &ModelMapData) -> Result<Vec<u8>> {
 fn convert_map_data_to_flatbuffer<'a>(
     builder: &mut FlatBufferBuilder<'a>,
     map_data: &ModelMapData,
-) -> flatbuffers::WIPOffset<tobmap::MapData<'a>> {
+) -> flatbuffers::WIPOffset<MapData<'a>> {
     // Create string offsets for metadata
     let version = builder.create_string(&map_data.version);
     let osm_data_date = builder.create_string(&map_data.osm_data_date);
@@ -54,118 +53,139 @@ fn convert_map_data_to_flatbuffer<'a>(
     let cells_vec = builder.create_vector(&fb_cells);
     
     // Create the MapData object
-    let args = tobmap::MapDataArgs {
+    let args = MapDataArgs {
         version: Some(version),
         osm_data_date: Some(osm_data_date),
         generation_date: Some(generation_date),
         cells: Some(cells_vec),
     };
     
-    tobmap::MapData::create(builder, &args)
+    MapData::create(builder, &args)
 }
 
 /// Convert a Cell to a FlatBuffer
 fn convert_cell_to_flatbuffer<'a>(
     builder: &mut FlatBufferBuilder<'a>,
     cell: &ModelCell,
-) -> flatbuffers::WIPOffset<tobmap::Cell<'a>> {
-    // Convert all nodes to FlatBuffer format
-    let mut fb_nodes = Vec::new();
-    for node in &cell.nodes {
-        let fb_node = convert_node_to_flatbuffer(builder, node);
-        fb_nodes.push(fb_node);
+) -> flatbuffers::WIPOffset<Cell<'a>> {
+    // Get the data from the cell's buffer storage
+    let s2_cell_id = cell.s2_cell_id;
+    
+    // For nodes
+    let mut node_offsets = Vec::new();
+    let nodes = cell.nodes();
+    for node in nodes {
+        // Extract node data
+        let id = node.id().unwrap_or("");
+        let id_offset = builder.create_string(id);
+        
+        // Create node
+        let node_args = NodeArgs {
+            id: Some(id_offset),
+            s2_cell_id: node.s2_cell_id(),
+            lat: node.lat(),
+            lng: node.lng(),
+        };
+        
+        let node_offset = Node::create(builder, &node_args);
+        node_offsets.push(node_offset);
     }
     
-    // Create a vector of node offsets
-    let nodes_vec = builder.create_vector(&fb_nodes);
+    let nodes_vec = builder.create_vector(&node_offsets);
     
-    // Convert all edges to FlatBuffer format
-    let mut fb_edges = Vec::new();
-    for edge in &cell.edges {
-        let fb_edge = convert_edge_to_flatbuffer(builder, edge);
-        fb_edges.push(fb_edge);
+    // For edges
+    let mut edge_offsets = Vec::new();
+    let edges = cell.edges();
+    for edge in edges {
+        // Extract edge data
+        let id = edge.id().unwrap_or("");
+        let source_node_id = edge.source_node_id().unwrap_or("");
+        let destination_node_id = edge.destination_node_id().unwrap_or("");
+        let name = edge.name().unwrap_or("");
+        
+        let id_offset = builder.create_string(id);
+        let source_id_offset = builder.create_string(source_node_id);
+        let dest_id_offset = builder.create_string(destination_node_id);
+        let name_offset = builder.create_string(name);
+        
+        // Extract travel costs
+        let mut travel_costs = Vec::new();
+        if let Some(costs) = edge.travel_costs() {
+            for i in 0..costs.len() {
+                travel_costs.push(costs.get(i));
+            }
+        }
+        let costs_vec = builder.create_vector(&travel_costs);
+        
+        // Extract geometry
+        let mut geometry_lats = Vec::new();
+        let mut geometry_lngs = Vec::new();
+        
+        if let Some(lats) = edge.geometry_lats() {
+            for i in 0..lats.len() {
+                geometry_lats.push(lats.get(i));
+            }
+        }
+        
+        if let Some(lngs) = edge.geometry_lngs() {
+            for i in 0..lngs.len() {
+                geometry_lngs.push(lngs.get(i));
+            }
+        }
+        
+        let lats_vec = builder.create_vector(&geometry_lats);
+        let lngs_vec = builder.create_vector(&geometry_lngs);
+        
+        // Extract tags
+        let mut tag_offsets = Vec::new();
+        if let Some(tags) = edge.tags() {
+            for i in 0..tags.len() {
+                let tag = tags.get(i);
+                let key = tag.key().unwrap_or("");
+                let value = tag.value().unwrap_or("");
+                
+                let key_offset = builder.create_string(key);
+                let value_offset = builder.create_string(value);
+                
+                let tag_args = KeyValueArgs {
+                    key: Some(key_offset),
+                    value: Some(value_offset),
+                };
+                
+                let tag_offset = KeyValue::create(builder, &tag_args);
+                tag_offsets.push(tag_offset);
+            }
+        }
+        
+        let tags_vec = builder.create_vector(&tag_offsets);
+        
+        // Create edge
+        let edge_args = EdgeArgs {
+            id: Some(id_offset),
+            source_node_id: Some(source_id_offset),
+            destination_node_id: Some(dest_id_offset),
+            name: Some(name_offset),
+            osm_way_id: edge.osm_way_id(),
+            travel_costs: Some(costs_vec),
+            geometry_lats: Some(lats_vec),
+            geometry_lngs: Some(lngs_vec),
+            tags: Some(tags_vec),
+        };
+        
+        let edge_offset = Edge::create(builder, &edge_args);
+        edge_offsets.push(edge_offset);
     }
     
-    // Create a vector of edge offsets
-    let edges_vec = builder.create_vector(&fb_edges);
+    let edges_vec = builder.create_vector(&edge_offsets);
     
     // Create the Cell object
-    let args = tobmap::CellArgs {
-        s2_cell_id: cell.s2_cell_id,
+    let args = CellArgs {
+        s2_cell_id,
         nodes: Some(nodes_vec),
         edges: Some(edges_vec),
     };
     
-    tobmap::Cell::create(builder, &args)
-}
-
-/// Convert a Node to a FlatBuffer
-fn convert_node_to_flatbuffer<'a>(
-    builder: &mut FlatBufferBuilder<'a>,
-    node: &ModelNode,
-) -> flatbuffers::WIPOffset<tobmap::Node<'a>> {
-    // Create a string offset for the node ID
-    let id = builder.create_string(&node.id);
-    
-    // Create the Node object
-    let args = tobmap::NodeArgs {
-        id: Some(id),
-        s2_cell_id: node.s2_cell_id,
-        lat: node.lat,
-        lng: node.lng,
-    };
-    
-    tobmap::Node::create(builder, &args)
-}
-
-/// Convert an Edge to a FlatBuffer
-fn convert_edge_to_flatbuffer<'a>(
-    builder: &mut FlatBufferBuilder<'a>,
-    edge: &ModelEdge,
-) -> flatbuffers::WIPOffset<tobmap::Edge<'a>> {
-    // Create string offsets
-    let id = builder.create_string(&edge.id);
-    let source_node_id = builder.create_string(&edge.source_node_id);
-    let destination_node_id = builder.create_string(&edge.destination_node_id);
-    let name = builder.create_string(&edge.name);
-    
-    // Create vectors for travel costs and geometry
-    let travel_costs_vec = builder.create_vector(&edge.travel_costs);
-    let geometry_lats_vec = builder.create_vector(&edge.geometry_lats);
-    let geometry_lngs_vec = builder.create_vector(&edge.geometry_lngs);
-    
-    // Convert tags to FlatBuffer KeyValue objects
-    let mut fb_tags = Vec::new();
-    for (key, value) in &edge.tags {
-        let key_str = builder.create_string(key);
-        let value_str = builder.create_string(value);
-        
-        let args = tobmap::KeyValueArgs {
-            key: Some(key_str),
-            value: Some(value_str),
-        };
-        
-        let kv = tobmap::KeyValue::create(builder, &args);
-        fb_tags.push(kv);
-    }
-    
-    // Create a vector of KeyValue offsets
-    let tags_vec = builder.create_vector(&fb_tags);
-    
-    // Create the Edge object
-    let args = tobmap::EdgeArgs {
-        id: Some(id),
-        source_node_id: Some(source_node_id),
-        destination_node_id: Some(destination_node_id),
-        name: Some(name),
-        osm_way_id: edge.osm_way_id,
-        travel_costs: Some(travel_costs_vec),
-        geometry_lats: Some(geometry_lats_vec),
-        geometry_lngs: Some(geometry_lngs_vec),
-        tags: Some(tags_vec),
-    };
-    
-    tobmap::Edge::create(builder, &args)
+    Cell::create(builder, &args)
 }
 
 /// Read map data from a file
@@ -214,13 +234,28 @@ pub fn parse_flatbuffer(buffer: &[u8]) -> Result<ModelMapData> {
             if let Some(nodes) = fb_cell.nodes() {
                 for j in 0..nodes.len() {
                     let fb_node = nodes.get(j);
-                    let node = ModelNode {
-                        id: fb_node.id().unwrap_or("").to_string(),
+                    
+                    // Create a new FlatBufferBuilder for this node
+                    let mut builder = FlatBufferBuilder::new();
+                    
+                    // Extract node data
+                    let id = fb_node.id().unwrap_or("").to_string();
+                    let id_offset = builder.create_string(&id);
+                    
+                    // Create a new node
+                    let node_args = NodeArgs {
+                        id: Some(id_offset),
                         s2_cell_id: fb_node.s2_cell_id(),
                         lat: fb_node.lat(),
                         lng: fb_node.lng(),
                     };
-                    cell.add_node(node);
+                    
+                    let node_offset = Node::create(&mut builder, &node_args);
+                    builder.finish(node_offset, None);
+                    
+                    // Get the buffer data and add it to the cell - make sure we clone the data
+                    let buf = builder.finished_data().to_vec();
+                    cell.add_node(buf);
                 }
             }
             
@@ -229,49 +264,90 @@ pub fn parse_flatbuffer(buffer: &[u8]) -> Result<ModelMapData> {
                 for j in 0..edges.len() {
                     let fb_edge = edges.get(j);
                     
-                    let mut edge = ModelEdge {
-                        id: fb_edge.id().unwrap_or("").to_string(),
-                        source_node_id: fb_edge.source_node_id().unwrap_or("").to_string(),
-                        destination_node_id: fb_edge.destination_node_id().unwrap_or("").to_string(),
-                        name: fb_edge.name().unwrap_or("").to_string(),
-                        osm_way_id: fb_edge.osm_way_id(),
-                        travel_costs: Vec::new(),
-                        geometry_lats: Vec::new(),
-                        geometry_lngs: Vec::new(),
-                        tags: HashMap::new(),
-                    };
+                    // Create a new FlatBufferBuilder for this edge
+                    let mut builder = FlatBufferBuilder::new();
                     
-                    // Process travel costs
-                    if let Some(travel_costs) = fb_edge.travel_costs() {
-                        for k in 0..travel_costs.len() {
-                            edge.travel_costs.push(travel_costs.get(k));
+                    // Extract edge data
+                    let id = fb_edge.id().unwrap_or("").to_string();
+                    let source_node_id = fb_edge.source_node_id().unwrap_or("").to_string();
+                    let destination_node_id = fb_edge.destination_node_id().unwrap_or("").to_string();
+                    let name = fb_edge.name().unwrap_or("").to_string();
+                    
+                    let id_offset = builder.create_string(&id);
+                    let source_id_offset = builder.create_string(&source_node_id);
+                    let dest_id_offset = builder.create_string(&destination_node_id);
+                    let name_offset = builder.create_string(&name);
+                    
+                    // Extract travel costs
+                    let mut travel_costs = Vec::new();
+                    if let Some(costs) = fb_edge.travel_costs() {
+                        for k in 0..costs.len() {
+                            travel_costs.push(costs.get(k));
+                        }
+                    }
+                    let costs_vec = builder.create_vector(&travel_costs);
+                    
+                    // Extract geometry
+                    let mut geometry_lats = Vec::new();
+                    let mut geometry_lngs = Vec::new();
+                    
+                    if let Some(lats) = fb_edge.geometry_lats() {
+                        for k in 0..lats.len() {
+                            geometry_lats.push(lats.get(k));
                         }
                     }
                     
-                    // Process geometry
-                    if let Some(geometry_lats) = fb_edge.geometry_lats() {
-                        for k in 0..geometry_lats.len() {
-                            edge.geometry_lats.push(geometry_lats.get(k));
+                    if let Some(lngs) = fb_edge.geometry_lngs() {
+                        for k in 0..lngs.len() {
+                            geometry_lngs.push(lngs.get(k));
                         }
                     }
                     
-                    if let Some(geometry_lngs) = fb_edge.geometry_lngs() {
-                        for k in 0..geometry_lngs.len() {
-                            edge.geometry_lngs.push(geometry_lngs.get(k));
-                        }
-                    }
+                    let lats_vec = builder.create_vector(&geometry_lats);
+                    let lngs_vec = builder.create_vector(&geometry_lngs);
                     
-                    // Process tags
+                    // Extract tags
+                    let mut tag_offsets = Vec::new();
                     if let Some(tags) = fb_edge.tags() {
                         for k in 0..tags.len() {
-                            let fb_tag = tags.get(k);
-                            if let (Some(key), Some(value)) = (fb_tag.key(), fb_tag.value()) {
-                                edge.tags.insert(key.to_string(), value.to_string());
-                            }
+                            let tag = tags.get(k);
+                            let key = tag.key().unwrap_or("").to_string();
+                            let value = tag.value().unwrap_or("").to_string();
+                            
+                            let key_offset = builder.create_string(&key);
+                            let value_offset = builder.create_string(&value);
+                            
+                            let tag_args = KeyValueArgs {
+                                key: Some(key_offset),
+                                value: Some(value_offset),
+                            };
+                            
+                            let tag_offset = KeyValue::create(&mut builder, &tag_args);
+                            tag_offsets.push(tag_offset);
                         }
                     }
                     
-                    cell.add_edge(edge);
+                    let tags_vec = builder.create_vector(&tag_offsets);
+                    
+                    // Create edge
+                    let edge_args = EdgeArgs {
+                        id: Some(id_offset),
+                        source_node_id: Some(source_id_offset),
+                        destination_node_id: Some(dest_id_offset),
+                        name: Some(name_offset),
+                        osm_way_id: fb_edge.osm_way_id(),
+                        travel_costs: Some(costs_vec),
+                        geometry_lats: Some(lats_vec),
+                        geometry_lngs: Some(lngs_vec),
+                        tags: Some(tags_vec),
+                    };
+                    
+                    let edge_offset = Edge::create(&mut builder, &edge_args);
+                    builder.finish(edge_offset, None);
+                    
+                    // Get the buffer data and add it to the cell - make sure we clone the data
+                    let buf = builder.finished_data().to_vec();
+                    cell.add_edge(buf);
                 }
             }
         }
