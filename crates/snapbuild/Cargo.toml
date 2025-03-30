@@ -1,0 +1,9 @@
+[package]
+name = "snapbuild"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+flatbuffers = "*"
+s2 = "*"
+schema = { path = "../schema" }
