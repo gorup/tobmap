@@ -204,6 +204,134 @@ impl<'a> flatbuffers::Verifiable for RoadInteraction {
 }
 
 impl flatbuffers::SimpleToVerifyInSlice for RoadInteraction {}
+// struct Interactions, aligned to 1
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct Interactions(pub [u8; 2]);
+impl Default for Interactions { 
+  fn default() -> Self { 
+    Self([0; 2])
+  }
+}
+impl core::fmt::Debug for Interactions {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    f.debug_struct("Interactions")
+      .field("incoming", &self.incoming())
+      .field("outgoing", &self.outgoing())
+      .finish()
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for Interactions {}
+impl<'a> flatbuffers::Follow<'a> for Interactions {
+  type Inner = &'a Interactions;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    <&'a Interactions>::follow(buf, loc)
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a Interactions {
+  type Inner = &'a Interactions;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::follow_cast_ref::<Interactions>(buf, loc)
+  }
+}
+impl<'b> flatbuffers::Push for Interactions {
+    type Output = Interactions;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src = ::core::slice::from_raw_parts(self as *const Interactions as *const u8, <Self as flatbuffers::Push>::size());
+        dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(1)
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for Interactions {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.in_buffer::<Self>(pos)
+  }
+}
+
+impl<'a> Interactions {
+  #[allow(clippy::too_many_arguments)]
+  pub fn new(
+    incoming: RoadInteraction,
+    outgoing: RoadInteraction,
+  ) -> Self {
+    let mut s = Self([0; 2]);
+    s.set_incoming(incoming);
+    s.set_outgoing(outgoing);
+    s
+  }
+
+  pub fn incoming(&self) -> RoadInteraction {
+    let mut mem = core::mem::MaybeUninit::<<RoadInteraction as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[0..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<RoadInteraction as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_incoming(&mut self, x: RoadInteraction) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[0..].as_mut_ptr(),
+        core::mem::size_of::<<RoadInteraction as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn outgoing(&self) -> RoadInteraction {
+    let mut mem = core::mem::MaybeUninit::<<RoadInteraction as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[1..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<RoadInteraction as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_outgoing(&mut self, x: RoadInteraction) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[1..].as_mut_ptr(),
+        core::mem::size_of::<<RoadInteraction as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+}
+
 pub enum NodeOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -220,12 +348,9 @@ impl<'a> flatbuffers::Follow<'a> for Node<'a> {
 }
 
 impl<'a> Node<'a> {
-  pub const VT_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_S2_CELL_ID: flatbuffers::VOffsetT = 6;
-  pub const VT_INCOMING_EDGES: flatbuffers::VOffsetT = 8;
-  pub const VT_INCOMING_ROAD_INTERACTIONS: flatbuffers::VOffsetT = 10;
-  pub const VT_OUTGOING_EDGES: flatbuffers::VOffsetT = 12;
-  pub const VT_OUTGOING_ROAD_INTERACTIONS: flatbuffers::VOffsetT = 14;
+  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_EDGES: flatbuffers::VOffsetT = 6;
+  pub const VT_INTERACTIONS: flatbuffers::VOffsetT = 8;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -237,57 +362,33 @@ impl<'a> Node<'a> {
     args: &'args NodeArgs<'args>
   ) -> flatbuffers::WIPOffset<Node<'bldr>> {
     let mut builder = NodeBuilder::new(_fbb);
-    builder.add_s2_cell_id(args.s2_cell_id);
-    builder.add_id(args.id);
-    if let Some(x) = args.outgoing_road_interactions { builder.add_outgoing_road_interactions(x); }
-    if let Some(x) = args.outgoing_edges { builder.add_outgoing_edges(x); }
-    if let Some(x) = args.incoming_road_interactions { builder.add_incoming_road_interactions(x); }
-    if let Some(x) = args.incoming_edges { builder.add_incoming_edges(x); }
+    builder.add_cell_id(args.cell_id);
+    if let Some(x) = args.interactions { builder.add_interactions(x); }
+    if let Some(x) = args.edges { builder.add_edges(x); }
     builder.finish()
   }
 
 
   #[inline]
-  pub fn id(&self) -> u64 {
+  pub fn cell_id(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Node::VT_ID, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u64>(Node::VT_CELL_ID, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn s2_cell_id(&self) -> u64 {
+  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, u64>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Node::VT_S2_CELL_ID, Some(0)).unwrap()}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(Node::VT_EDGES, None)}
   }
   #[inline]
-  pub fn incoming_edges(&self) -> Option<flatbuffers::Vector<'a, u64>> {
+  pub fn interactions(&self) -> Option<flatbuffers::Vector<'a, Interactions>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(Node::VT_INCOMING_EDGES, None)}
-  }
-  #[inline]
-  pub fn incoming_road_interactions(&self) -> Option<flatbuffers::Vector<'a, RoadInteraction>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, RoadInteraction>>>(Node::VT_INCOMING_ROAD_INTERACTIONS, None)}
-  }
-  #[inline]
-  pub fn outgoing_edges(&self) -> Option<flatbuffers::Vector<'a, u64>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(Node::VT_OUTGOING_EDGES, None)}
-  }
-  #[inline]
-  pub fn outgoing_road_interactions(&self) -> Option<flatbuffers::Vector<'a, RoadInteraction>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, RoadInteraction>>>(Node::VT_OUTGOING_ROAD_INTERACTIONS, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, Interactions>>>(Node::VT_INTERACTIONS, None)}
   }
 }
 
@@ -298,34 +399,25 @@ impl flatbuffers::Verifiable for Node<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<u64>("s2_cell_id", Self::VT_S2_CELL_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("incoming_edges", Self::VT_INCOMING_EDGES, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, RoadInteraction>>>("incoming_road_interactions", Self::VT_INCOMING_ROAD_INTERACTIONS, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("outgoing_edges", Self::VT_OUTGOING_EDGES, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, RoadInteraction>>>("outgoing_road_interactions", Self::VT_OUTGOING_ROAD_INTERACTIONS, false)?
+     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("edges", Self::VT_EDGES, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Interactions>>>("interactions", Self::VT_INTERACTIONS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct NodeArgs<'a> {
-    pub id: u64,
-    pub s2_cell_id: u64,
-    pub incoming_edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
-    pub incoming_road_interactions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, RoadInteraction>>>,
-    pub outgoing_edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
-    pub outgoing_road_interactions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, RoadInteraction>>>,
+    pub cell_id: u64,
+    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
+    pub interactions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Interactions>>>,
 }
 impl<'a> Default for NodeArgs<'a> {
   #[inline]
   fn default() -> Self {
     NodeArgs {
-      id: 0,
-      s2_cell_id: 0,
-      incoming_edges: None,
-      incoming_road_interactions: None,
-      outgoing_edges: None,
-      outgoing_road_interactions: None,
+      cell_id: 0,
+      edges: None,
+      interactions: None,
     }
   }
 }
@@ -336,28 +428,16 @@ pub struct NodeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NodeBuilder<'a, 'b, A> {
   #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(Node::VT_ID, id, 0);
+  pub fn add_cell_id(&mut self, cell_id: u64) {
+    self.fbb_.push_slot::<u64>(Node::VT_CELL_ID, cell_id, 0);
   }
   #[inline]
-  pub fn add_s2_cell_id(&mut self, s2_cell_id: u64) {
-    self.fbb_.push_slot::<u64>(Node::VT_S2_CELL_ID, s2_cell_id, 0);
+  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u64>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_EDGES, edges);
   }
   #[inline]
-  pub fn add_incoming_edges(&mut self, incoming_edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u64>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_INCOMING_EDGES, incoming_edges);
-  }
-  #[inline]
-  pub fn add_incoming_road_interactions(&mut self, incoming_road_interactions: flatbuffers::WIPOffset<flatbuffers::Vector<'b , RoadInteraction>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_INCOMING_ROAD_INTERACTIONS, incoming_road_interactions);
-  }
-  #[inline]
-  pub fn add_outgoing_edges(&mut self, outgoing_edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u64>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_OUTGOING_EDGES, outgoing_edges);
-  }
-  #[inline]
-  pub fn add_outgoing_road_interactions(&mut self, outgoing_road_interactions: flatbuffers::WIPOffset<flatbuffers::Vector<'b , RoadInteraction>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_OUTGOING_ROAD_INTERACTIONS, outgoing_road_interactions);
+  pub fn add_interactions(&mut self, interactions: flatbuffers::WIPOffset<flatbuffers::Vector<'b , Interactions>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_INTERACTIONS, interactions);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> NodeBuilder<'a, 'b, A> {
@@ -377,12 +457,9 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NodeBuilder<'a, 'b, A> {
 impl core::fmt::Debug for Node<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("Node");
-      ds.field("id", &self.id());
-      ds.field("s2_cell_id", &self.s2_cell_id());
-      ds.field("incoming_edges", &self.incoming_edges());
-      ds.field("incoming_road_interactions", &self.incoming_road_interactions());
-      ds.field("outgoing_edges", &self.outgoing_edges());
-      ds.field("outgoing_road_interactions", &self.outgoing_road_interactions());
+      ds.field("cell_id", &self.cell_id());
+      ds.field("edges", &self.edges());
+      ds.field("interactions", &self.interactions());
       ds.finish()
   }
 }
@@ -402,10 +479,11 @@ impl<'a> flatbuffers::Follow<'a> for Edge<'a> {
 }
 
 impl<'a> Edge<'a> {
-  pub const VT_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_SOURCE_NODE_ID: flatbuffers::VOffsetT = 6;
-  pub const VT_DESTINATION_NODE_ID: flatbuffers::VOffsetT = 8;
-  pub const VT_TRAVEL_COSTS: flatbuffers::VOffsetT = 10;
+  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_POINT_1_NODE_IDX: flatbuffers::VOffsetT = 6;
+  pub const VT_POINT_2_NODE_IDX: flatbuffers::VOffsetT = 8;
+  pub const VT_BACKWARDS_ALLOWED: flatbuffers::VOffsetT = 10;
+  pub const VT_TRAVEL_COSTS: flatbuffers::VOffsetT = 12;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -417,34 +495,42 @@ impl<'a> Edge<'a> {
     args: &'args EdgeArgs<'args>
   ) -> flatbuffers::WIPOffset<Edge<'bldr>> {
     let mut builder = EdgeBuilder::new(_fbb);
-    builder.add_destination_node_id(args.destination_node_id);
-    builder.add_source_node_id(args.source_node_id);
-    builder.add_id(args.id);
+    builder.add_point_2_node_idx(args.point_2_node_idx);
+    builder.add_point_1_node_idx(args.point_1_node_idx);
+    builder.add_cell_id(args.cell_id);
     if let Some(x) = args.travel_costs { builder.add_travel_costs(x); }
+    builder.add_backwards_allowed(args.backwards_allowed);
     builder.finish()
   }
 
 
   #[inline]
-  pub fn id(&self) -> u64 {
+  pub fn cell_id(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_ID, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u64>(Edge::VT_CELL_ID, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn source_node_id(&self) -> u64 {
+  pub fn point_1_node_idx(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_SOURCE_NODE_ID, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u64>(Edge::VT_POINT_1_NODE_IDX, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn destination_node_id(&self) -> u64 {
+  pub fn point_2_node_idx(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_DESTINATION_NODE_ID, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u64>(Edge::VT_POINT_2_NODE_IDX, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn backwards_allowed(&self) -> bool {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<bool>(Edge::VT_BACKWARDS_ALLOWED, Some(false)).unwrap()}
   }
   #[inline]
   pub fn travel_costs(&self) -> Option<flatbuffers::Vector<'a, f32>> {
@@ -462,27 +548,30 @@ impl flatbuffers::Verifiable for Edge<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<u64>("id", Self::VT_ID, false)?
-     .visit_field::<u64>("source_node_id", Self::VT_SOURCE_NODE_ID, false)?
-     .visit_field::<u64>("destination_node_id", Self::VT_DESTINATION_NODE_ID, false)?
+     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
+     .visit_field::<u64>("point_1_node_idx", Self::VT_POINT_1_NODE_IDX, false)?
+     .visit_field::<u64>("point_2_node_idx", Self::VT_POINT_2_NODE_IDX, false)?
+     .visit_field::<bool>("backwards_allowed", Self::VT_BACKWARDS_ALLOWED, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("travel_costs", Self::VT_TRAVEL_COSTS, false)?
      .finish();
     Ok(())
   }
 }
 pub struct EdgeArgs<'a> {
-    pub id: u64,
-    pub source_node_id: u64,
-    pub destination_node_id: u64,
+    pub cell_id: u64,
+    pub point_1_node_idx: u64,
+    pub point_2_node_idx: u64,
+    pub backwards_allowed: bool,
     pub travel_costs: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
 }
 impl<'a> Default for EdgeArgs<'a> {
   #[inline]
   fn default() -> Self {
     EdgeArgs {
-      id: 0,
-      source_node_id: 0,
-      destination_node_id: 0,
+      cell_id: 0,
+      point_1_node_idx: 0,
+      point_2_node_idx: 0,
+      backwards_allowed: false,
       travel_costs: None,
     }
   }
@@ -494,16 +583,20 @@ pub struct EdgeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EdgeBuilder<'a, 'b, A> {
   #[inline]
-  pub fn add_id(&mut self, id: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_ID, id, 0);
+  pub fn add_cell_id(&mut self, cell_id: u64) {
+    self.fbb_.push_slot::<u64>(Edge::VT_CELL_ID, cell_id, 0);
   }
   #[inline]
-  pub fn add_source_node_id(&mut self, source_node_id: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_SOURCE_NODE_ID, source_node_id, 0);
+  pub fn add_point_1_node_idx(&mut self, point_1_node_idx: u64) {
+    self.fbb_.push_slot::<u64>(Edge::VT_POINT_1_NODE_IDX, point_1_node_idx, 0);
   }
   #[inline]
-  pub fn add_destination_node_id(&mut self, destination_node_id: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_DESTINATION_NODE_ID, destination_node_id, 0);
+  pub fn add_point_2_node_idx(&mut self, point_2_node_idx: u64) {
+    self.fbb_.push_slot::<u64>(Edge::VT_POINT_2_NODE_IDX, point_2_node_idx, 0);
+  }
+  #[inline]
+  pub fn add_backwards_allowed(&mut self, backwards_allowed: bool) {
+    self.fbb_.push_slot::<bool>(Edge::VT_BACKWARDS_ALLOWED, backwards_allowed, false);
   }
   #[inline]
   pub fn add_travel_costs(&mut self, travel_costs: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
@@ -527,10 +620,142 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EdgeBuilder<'a, 'b, A> {
 impl core::fmt::Debug for Edge<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("Edge");
-      ds.field("id", &self.id());
-      ds.field("source_node_id", &self.source_node_id());
-      ds.field("destination_node_id", &self.destination_node_id());
+      ds.field("cell_id", &self.cell_id());
+      ds.field("point_1_node_idx", &self.point_1_node_idx());
+      ds.field("point_2_node_idx", &self.point_2_node_idx());
+      ds.field("backwards_allowed", &self.backwards_allowed());
       ds.field("travel_costs", &self.travel_costs());
+      ds.finish()
+  }
+}
+pub enum GraphBlobOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct GraphBlob<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for GraphBlob<'a> {
+  type Inner = GraphBlob<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> GraphBlob<'a> {
+  pub const VT_NAME: flatbuffers::VOffsetT = 4;
+  pub const VT_EDGES: flatbuffers::VOffsetT = 6;
+  pub const VT_NODES: flatbuffers::VOffsetT = 8;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    GraphBlob { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args GraphBlobArgs<'args>
+  ) -> flatbuffers::WIPOffset<GraphBlob<'bldr>> {
+    let mut builder = GraphBlobBuilder::new(_fbb);
+    if let Some(x) = args.nodes { builder.add_nodes(x); }
+    if let Some(x) = args.edges { builder.add_edges(x); }
+    if let Some(x) = args.name { builder.add_name(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn name(&self) -> Option<&'a str> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GraphBlob::VT_NAME, None)}
+  }
+  #[inline]
+  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge>>>>(GraphBlob::VT_EDGES, None)}
+  }
+  #[inline]
+  pub fn nodes(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Node<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Node>>>>(GraphBlob::VT_NODES, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for GraphBlob<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Edge>>>>("edges", Self::VT_EDGES, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Node>>>>("nodes", Self::VT_NODES, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct GraphBlobArgs<'a> {
+    pub name: Option<flatbuffers::WIPOffset<&'a str>>,
+    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge<'a>>>>>,
+    pub nodes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Node<'a>>>>>,
+}
+impl<'a> Default for GraphBlobArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    GraphBlobArgs {
+      name: None,
+      edges: None,
+      nodes: None,
+    }
+  }
+}
+
+pub struct GraphBlobBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> GraphBlobBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_name(&mut self, name: flatbuffers::WIPOffset<&'b  str>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GraphBlob::VT_NAME, name);
+  }
+  #[inline]
+  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Edge<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GraphBlob::VT_EDGES, edges);
+  }
+  #[inline]
+  pub fn add_nodes(&mut self, nodes: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Node<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GraphBlob::VT_NODES, nodes);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> GraphBlobBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    GraphBlobBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<GraphBlob<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for GraphBlob<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("GraphBlob");
+      ds.field("name", &self.name());
+      ds.field("edges", &self.edges());
+      ds.field("nodes", &self.nodes());
       ds.finish()
   }
 }

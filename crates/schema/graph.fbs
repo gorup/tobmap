@@ -15,33 +15,41 @@ enum RoadInteraction : byte {
     TrafficLight = 3,
 }
 
+struct Interactions {
+    incoming:RoadInteraction;
+    outgoing:RoadInteraction;
+}
+
 // A node represents a real-world intersection
 table Node {
-  // Unique identifier for the node
-  id:uint64;
+  cell_id:uint64;
 
-  // S2 cell identifier at the lowest possible level
-  s2_cell_id:uint64;
-
-  // incoming edges
-  incoming_edges:[uint64];
-  incoming_road_interactions:[RoadInteraction];
-
-  // outgoing edges
-  outgoing_edges:[uint64];
-  outgoing_road_interactions:[RoadInteraction];
+  // related edges, with their interactions for 
+  // incoming, outgoing pairs
+  edges:[uint64];
+  interactions:[Interactions];
 }
 
 // An edge represents a way (street, path, etc.) between two nodes
 table Edge {
-  // Unique identifier for the edge
-  id:uint64;
+  cell_id:uint64;
   
-  // Source and destination node identifiers
-  source_node_id:uint64;
-  destination_node_id:uint64;
+  point_1_node_idx:uint64;
+  point_2_node_idx:uint64;
+
+  // Can you go from vertex_2 to vertex_1?
+  backwards_allowed:bool;
   
   // Travel costs (time in seconds) for different travel modes
   // A negative value indicates that this mode is not allowed
   travel_costs:[float];
+}
+
+table GraphBlob {
+    name:string;
+
+    // https://www.youtube.com/watch?v=B7-_hb28Wmk
+    edges:[Edge];
+
+    nodes:[Node];
 }

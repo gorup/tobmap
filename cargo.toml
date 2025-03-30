@@ -2,4 +2,6 @@
 members = ["crates/*"]
 
 [workspace.dependencies]
-flatbuffers = "*"
+# keep-sorted
+flatbuffers = "24.3.25"
+s2 = "0.0.13"
