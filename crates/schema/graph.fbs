@@ -1,0 +1,47 @@
+namespace tobmapgraph;
+
+// Travel modes for edge costs
+enum TravelMode : byte {
+  Car = 0,
+  Bike = 1,
+  Walk = 2,
+  Transit = 3
+}
+
+enum RoadInteraction : byte {
+    None = 0,
+    Yield = 1,
+    StopSign = 2,
+    TrafficLight = 3,
+}
+
+// A node represents a real-world intersection
+table Node {
+  // Unique identifier for the node
+  id:uint64;
+
+  // S2 cell identifier at the lowest possible level
+  s2_cell_id:uint64;
+
+  // incoming edges
+  incoming_edges:[uint64];
+  incoming_road_interactions:[RoadInteraction];
+
+  // outgoing edges
+  outgoing_edges:[uint64];
+  outgoing_road_interactions:[RoadInteraction];
+}
+
+// An edge represents a way (street, path, etc.) between two nodes
+table Edge {
+  // Unique identifier for the edge
+  id:uint64;
+  
+  // Source and destination node identifiers
+  source_node_id:uint64;
+  destination_node_id:uint64;
+  
+  // Travel costs (time in seconds) for different travel modes
+  // A negative value indicates that this mode is not allowed
+  travel_costs:[float];
+}
