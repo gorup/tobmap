@@ -2,6 +2,11 @@
 members = ["crates/*"]
 
 [workspace.dependencies]
-# keep-sorted
 flatbuffers = "24.3.25"
 s2 = "0.0.13"
+osmpbfreader = "0.16"
+rayon = "1.8"
+anyhow = "1.0"
+thiserror = "1.0"
+geo = "0.26"
+indicatif = "0.17"
