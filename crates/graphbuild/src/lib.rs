@@ -82,10 +82,12 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
     progress.set_message("Processing OSM data...");
     
     // Use get_objs_and_deps to get all highways and their nodes in a single pass
+    let road_tags = &["highway", "road", "street", "primary", "secondary", "tertiary", "residential", "service", "trunk"];
+
     progress.set_message("Loading highways and nodes...");
     let objects = reader.get_objs_and_deps(|obj| {
         match obj {
-            OsmObj::Way(way) => way.tags.contains_key("highway"),
+            OsmObj::Way(way) => way.tags.keys().any(|tag| road_tags.contains(&tag.as_str())),
             _ => false
         }
     }).map_err(|e| GraphBuildError::OsmError(e.to_string()))?;
