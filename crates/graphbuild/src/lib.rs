@@ -3,7 +3,7 @@ use std::fs::File;
 use std::path::Path;
 
 use flatbuffers::FlatBufferBuilder;
-use osmpbfreader::{Node, OsmObj, OsmPbfReader, Way};
+use osmpbfreader::{Node, OsmId, OsmObj, OsmPbfReader, Way};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
 use schema::tobmapgraph::{Edge, EdgeArgs, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction};
@@ -81,67 +81,40 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
         .unwrap());
     progress.set_message("Processing OSM data...");
     
-    // First pass: collect all ways (roads) and their nodes
-    let ways_result: Vec<Result<(i64, Way), GraphBuildError>> = reader.iter()
-        .filter_map(|obj_result| {
-            match obj_result {
-                Ok(OsmObj::Way(way)) => {
-                    // Only keep ways that are highways (roads, paths, etc.)
-                    if way.tags.contains_key("highway") {
-                        Some(Ok((way.id.0, way)))
-                    } else {
-                        None
-                    }
-                }
-                Err(e) => Some(Err(GraphBuildError::OsmError(e.to_string()))),
-                _ => None,
-            }
-        })
-        .collect();
+    // Use get_objs_and_deps to get all highways and their nodes in a single pass
+    progress.set_message("Loading highways and nodes...");
+    let objects = reader.get_objs_and_deps(|obj| {
+        match obj {
+            OsmObj::Way(way) => way.tags.contains_key("highway"),
+            _ => false
+        }
+    }).map_err(|e| GraphBuildError::OsmError(e.to_string()))?;
     
-    // Check for errors and collect ways
-    let ways: HashMap<i64, Way> = ways_result.into_iter()
-        .collect::<Result<HashMap<_, _>, _>>()?;
+    // Extract ways and nodes from the objects
+    let mut ways: HashMap<i64, Way> = HashMap::new();
+    let mut nodes: HashMap<i64, Node> = HashMap::new();
     
-    progress.set_message(format!("Found {} ways", ways.len()));
-    
-    // Collect all nodes used by ways
-    let mut node_ids: HashSet<i64> = HashSet::new();
-    for way in ways.values() {
-        for node_id in &way.nodes {
-            node_ids.insert(node_id.0);
+    for (id, obj) in objects {
+        match obj {
+            OsmObj::Way(way) => {
+                let way_id = match id {
+                    OsmId::Way(id) => id.0,
+                    _ => continue, // Skip if not matching the correct type
+                };
+                ways.insert(way_id, way);
+            },
+            OsmObj::Node(node) => {
+                let node_id = match id {
+                    OsmId::Node(id) => id.0,
+                    _ => continue, // Skip if not matching the correct type
+                };
+                nodes.insert(node_id, node);
+            },
+            _ => {} // Ignore relations
         }
     }
     
-    progress.set_message(format!("Found {} unique nodes", node_ids.len()));
-    
-    // Reset the reader for second pass
-    let file = File::open(&osm_path)
-        .map_err(|e| GraphBuildError::IoError(e))?;
-    let mut reader = OsmPbfReader::new(file);
-    
-    // Second pass: collect all needed nodes (their coordinates)
-    let nodes_result: Vec<Result<(i64, Node), GraphBuildError>> = reader.iter()
-        .filter_map(|obj_result| {
-            match obj_result {
-                Ok(OsmObj::Node(node)) => {
-                    if node_ids.contains(&node.id.0) {
-                        Some(Ok((node.id.0, node)))
-                    } else {
-                        None
-                    }
-                }
-                Err(e) => Some(Err(GraphBuildError::OsmError(e.to_string()))),
-                _ => None,
-            }
-        })
-        .collect();
-    
-    // Check for errors and collect nodes
-    let nodes: HashMap<i64, Node> = nodes_result.into_iter()
-        .collect::<Result<HashMap<_, _>, _>>()?;
-    
-    progress.set_message(format!("Loaded {} nodes", nodes.len()));
+    progress.set_message(format!("Found {} ways and {} nodes", ways.len(), nodes.len()));
     
     // Find intersections (nodes where multiple ways meet)
     let mut node_way_counts: HashMap<i64, HashSet<i64>> = HashMap::new();
@@ -172,6 +145,22 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
             }
         })
         .collect();
+    
+    // Check for duplicate cell IDs in nodes
+    let mut seen_node_cell_ids = HashSet::new();
+    let mut duplicate_node_cell_ids = HashSet::new();
+    
+    for (_, intersection) in &intersections {
+        if !seen_node_cell_ids.insert(intersection.cell_id) {
+            duplicate_node_cell_ids.insert(intersection.cell_id);
+        }
+    }
+    
+    if !duplicate_node_cell_ids.is_empty() {
+        return Err(GraphBuildError::ProcessingError(
+            format!("Duplicate node cell IDs found: {:?}", duplicate_node_cell_ids)
+        ));
+    }
     
     progress.set_message(format!("Found {} intersections", intersections.len()));
     
@@ -372,6 +361,22 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
     
     // Sort edges by cell ID for locality
     edge_node_pairs.sort_by_key(|(_, _, cell_id, _, _, _, _)| *cell_id);
+    
+    // Check for duplicate cell IDs in edges
+    let mut seen_edge_cell_ids = HashSet::new();
+    let mut duplicate_edge_cell_ids = HashSet::new();
+    
+    for (_, _, cell_id, _, _, _, _) in &edge_node_pairs {
+        if !seen_edge_cell_ids.insert(*cell_id) {
+            duplicate_edge_cell_ids.insert(*cell_id);
+        }
+    }
+    
+    if !duplicate_edge_cell_ids.is_empty() {
+        return Err(GraphBuildError::ProcessingError(
+            format!("Duplicate edge cell IDs found: {:?}", duplicate_edge_cell_ids)
+        ));
+    }
     
     // Create flatbuffer edges
     for (start_idx, end_idx, cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
