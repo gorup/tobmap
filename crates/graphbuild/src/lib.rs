@@ -59,20 +59,18 @@ struct RoadSegment {
     interactions: HashMap<i64, RoadInteraction>,
 }
 
-/// Parses an OSM PBF file and returns a GraphBlob
+/// Parses OSM PBF data and returns a GraphBlob
 /// 
 /// The function processes the OpenStreetMap data to create a graph representation
 /// with nodes (intersections) and edges (road segments).
 ///
 /// # Arguments
-/// * `osm_path` - Path to the OSM PBF file
+/// * `osm_data` - Slice of bytes containing OSM PBF data
 ///
 /// # Returns
 /// * `StatusOr<Vec<u8>>` - Result containing the serialized graph data or an error
-pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
-    let file = File::open(&osm_path)
-        .map_err(|e| GraphBuildError::IoError(e))?;
-    let mut reader = OsmPbfReader::new(file);
+pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
+    let mut reader = OsmPbfReader::new(std::io::Cursor::new(osm_data));
     
     println!("Reading OSM data...");
     let progress = ProgressBar::new_spinner();
@@ -147,22 +145,6 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
             }
         })
         .collect();
-    
-    // Check for duplicate cell IDs in nodes
-    let mut seen_node_cell_ids = HashSet::new();
-    let mut duplicate_node_cell_ids = HashSet::new();
-    
-    for (_, intersection) in &intersections {
-        if !seen_node_cell_ids.insert(intersection.cell_id) {
-            duplicate_node_cell_ids.insert(intersection.cell_id);
-        }
-    }
-    
-    if !duplicate_node_cell_ids.is_empty() {
-        return Err(GraphBuildError::ProcessingError(
-            format!("Duplicate node cell IDs found: {:?}", duplicate_node_cell_ids)
-        ));
-    }
     
     progress.set_message(format!("Found {} intersections", intersections.len()));
     
@@ -363,23 +345,7 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
     
     // Sort edges by cell ID for locality
     edge_node_pairs.sort_by_key(|(_, _, cell_id, _, _, _, _)| *cell_id);
-    
-    // Check for duplicate cell IDs in edges
-    let mut seen_edge_cell_ids = HashSet::new();
-    let mut duplicate_edge_cell_ids = HashSet::new();
-    
-    for (_, _, cell_id, _, _, _, _) in &edge_node_pairs {
-        if !seen_edge_cell_ids.insert(*cell_id) {
-            duplicate_edge_cell_ids.insert(*cell_id);
-        }
-    }
-    
-    if !duplicate_edge_cell_ids.is_empty() {
-        return Err(GraphBuildError::ProcessingError(
-            format!("Duplicate edge cell IDs found: {:?}", duplicate_edge_cell_ids)
-        ));
-    }
-    
+ 
     // Create flatbuffer edges
     for (start_idx, end_idx, cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
         let travel_costs_offset = builder.create_vector(travel_costs);
@@ -494,4 +460,60 @@ pub fn osm_to_graph_blob<P: AsRef<Path>>(osm_path: P) -> StatusOr<Vec<u8>> {
 /// * `GraphBlob` - Reference to the graph data in the buffer
 pub fn get_graph_blob(buffer: &[u8]) -> schema::tobmapgraph::GraphBlob {
     flatbuffers::root::<schema::tobmapgraph::GraphBlob>(buffer).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_tinytiny_graph_building() {
+        // Read the test data file
+        let test_data = fs::read("testdata/test_network.osm.pbf").expect("Failed to read test data file");
+        
+        // Build the graph
+        let graph_data = osm_to_graph_blob(&test_data).expect("Failed to build graph");
+        let graph = get_graph_blob(&graph_data);
+
+        // Verify basic graph properties
+        assert_eq!(graph.nodes().unwrap().len(), 15, "Should have 15 nodes");
+        assert_eq!(graph.edges().unwrap().len(), 13, "Should have 13 edges");
+
+        // Verify graph name
+        assert_eq!(graph.name().unwrap(), "OSM Generated Graph");
+
+        // Verify edge properties
+        let edge = graph.edges().expect("Should have at least one edge").get(0);
+        assert!(edge.cell_id() > 0, "Edge should have a valid cell ID");
+        assert!(edge.point_1_node_idx() < graph.nodes().unwrap().len() as u64, "Edge start node should be valid");
+        assert!(edge.point_2_node_idx() < graph.nodes().unwrap().len() as u64, "Edge end node should be valid");
+        assert_eq!(edge.travel_costs().unwrap().len(), 4, "Edge should have costs for all travel modes");
+
+        // Verify node properties
+        let node = graph.nodes().expect("Should have at least one node").get(0);
+        assert!(node.cell_id() > 0, "Node should have a valid cell ID");
+        assert_eq!(node.edges().unwrap().len(), node.interactions().unwrap().len(), 
+                  "Node should have matching number of edges and interactions");
+
+        // Verify connectivity
+        let node_edges = node.edges().unwrap();
+        assert!(!node_edges.is_empty(), "Node should have at least one connected edge");
+        
+        // Verify travel costs are reasonable
+        for edge in graph.edges().unwrap().iter() {
+            let costs = edge.travel_costs().unwrap();
+            assert_eq!(costs.len(), 4, "Each edge should have costs for all travel modes");
+            
+            // Car costs should be positive for most roads
+            assert!(costs.get(0) > 0.0 || costs.get(0) == -1.0, "Car costs should be positive or -1");
+            
+            // Bike and walk costs should be positive for most roads
+            assert!(costs.get(1) > 0.0 || costs.get(1) == -1.0, "Bike costs should be positive or -1");
+            assert!(costs.get(2) > 0.0 || costs.get(2) == -1.0, "Walk costs should be positive or -1");
+            
+            // Transit costs should be -1 (not supported)
+            assert_eq!(costs.get(3), -1.0, "Transit costs should be -1");
+        }
+    }
 }

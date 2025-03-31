@@ -2,7 +2,7 @@ use graphbuild::osm_to_graph_blob;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::fs::File;
-use std::io::Write;
+use std::io::{Write, Read};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -26,7 +26,22 @@ fn main() {
     
     println!("Processing OSM file: {}", osm_path);
     
-    match osm_to_graph_blob(Path::new(osm_path)) {
+    // Read the OSM file into a byte vector
+    let mut osm_data = Vec::new();
+    match File::open(osm_path) {
+        Ok(mut file) => {
+            if let Err(e) = file.read_to_end(&mut osm_data) {
+                eprintln!("Error reading OSM file: {}", e);
+                std::process::exit(1);
+            }
+        },
+        Err(e) => {
+            eprintln!("Error opening OSM file: {}", e);
+            std::process::exit(1);
+        }
+    }
+    
+    match osm_to_graph_blob(&osm_data) {
         Ok(graph_blob) => {
             println!("Successfully generated graph blob with {} bytes", graph_blob.len());
             
