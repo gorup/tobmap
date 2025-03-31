@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package tobmapapi;
+
+service SnapService {
+    rpc GetSnap(SnapRequest) returns (SnapResponse) {}
+}
+
+message SnapRequest {
+    double lat = 1;
+    double lng = 2;
+}
+
+message SnapResponse {
+    uint64 edge_index = 1;
+    double lat = 2;
+    double lng = 3;
+}
