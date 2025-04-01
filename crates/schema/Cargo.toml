@@ -4,5 +4,4 @@ version = "0.0.0"
 edition = "2024"
 
 [dependencies]
-flatbuffers = "*"
-
+flatbuffers = "25.2.10"

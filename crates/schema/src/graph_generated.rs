@@ -19,99 +19,6 @@ pub mod tobmapgraph {
   use self::flatbuffers::{EndianScalar, Follow};
 
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MIN_TRAVEL_MODE: i8 = 0;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_TRAVEL_MODE: i8 = 3;
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-#[allow(non_camel_case_types)]
-pub const ENUM_VALUES_TRAVEL_MODE: [TravelMode; 4] = [
-  TravelMode::Car,
-  TravelMode::Bike,
-  TravelMode::Walk,
-  TravelMode::Transit,
-];
-
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[repr(transparent)]
-pub struct TravelMode(pub i8);
-#[allow(non_upper_case_globals)]
-impl TravelMode {
-  pub const Car: Self = Self(0);
-  pub const Bike: Self = Self(1);
-  pub const Walk: Self = Self(2);
-  pub const Transit: Self = Self(3);
-
-  pub const ENUM_MIN: i8 = 0;
-  pub const ENUM_MAX: i8 = 3;
-  pub const ENUM_VALUES: &'static [Self] = &[
-    Self::Car,
-    Self::Bike,
-    Self::Walk,
-    Self::Transit,
-  ];
-  /// Returns the variant's name or "" if unknown.
-  pub fn variant_name(self) -> Option<&'static str> {
-    match self {
-      Self::Car => Some("Car"),
-      Self::Bike => Some("Bike"),
-      Self::Walk => Some("Walk"),
-      Self::Transit => Some("Transit"),
-      _ => None,
-    }
-  }
-}
-impl core::fmt::Debug for TravelMode {
-  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-    if let Some(name) = self.variant_name() {
-      f.write_str(name)
-    } else {
-      f.write_fmt(format_args!("<UNKNOWN {:?}>", self.0))
-    }
-  }
-}
-impl<'a> flatbuffers::Follow<'a> for TravelMode {
-  type Inner = Self;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    let b = flatbuffers::read_scalar_at::<i8>(buf, loc);
-    Self(b)
-  }
-}
-
-impl flatbuffers::Push for TravelMode {
-    type Output = TravelMode;
-    #[inline]
-    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        flatbuffers::emplace_scalar::<i8>(dst, self.0);
-    }
-}
-
-impl flatbuffers::EndianScalar for TravelMode {
-  type Scalar = i8;
-  #[inline]
-  fn to_little_endian(self) -> i8 {
-    self.0.to_le()
-  }
-  #[inline]
-  #[allow(clippy::wrong_self_convention)]
-  fn from_little_endian(v: i8) -> Self {
-    let b = i8::from_le(v);
-    Self(b)
-  }
-}
-
-impl<'a> flatbuffers::Verifiable for TravelMode {
-  #[inline]
-  fn run_verifier(
-    v: &mut flatbuffers::Verifier, pos: usize
-  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-    use self::flatbuffers::Verifiable;
-    i8::run_verifier(v, pos)
-  }
-}
-
-impl flatbuffers::SimpleToVerifyInSlice for TravelMode {}
-#[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_ROAD_INTERACTION: i8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MAX_ROAD_INTERACTION: i8 = 3;
@@ -241,8 +148,12 @@ impl<'b> flatbuffers::Push for Interactions {
     type Output = Interactions;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Interactions as *const u8, Self::size());
+        let src = ::core::slice::from_raw_parts(self as *const Interactions as *const u8, <Self as flatbuffers::Push>::size());
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(1)
     }
 }
 
@@ -331,10 +242,10 @@ impl<'a> Interactions {
 // struct Edge, aligned to 8
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub struct Edge(pub [u8; 32]);
+pub struct Edge(pub [u8; 24]);
 impl Default for Edge { 
   fn default() -> Self { 
-    Self([0; 32])
+    Self([0; 24])
   }
 }
 impl core::fmt::Debug for Edge {
@@ -347,7 +258,6 @@ impl core::fmt::Debug for Edge {
       .field("car_travel_cost", &self.car_travel_cost())
       .field("bike_travel_cost", &self.bike_travel_cost())
       .field("walk_travel_cost", &self.walk_travel_cost())
-      .field("transit_travel_cost", &self.transit_travel_cost())
       .finish()
   }
 }
@@ -371,8 +281,12 @@ impl<'b> flatbuffers::Push for Edge {
     type Output = Edge;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Edge as *const u8, Self::size());
+        let src = ::core::slice::from_raw_parts(self as *const Edge as *const u8, <Self as flatbuffers::Push>::size());
         dst.copy_from_slice(src);
+    }
+    #[inline]
+    fn alignment() -> flatbuffers::PushAlignment {
+        flatbuffers::PushAlignment::new(8)
     }
 }
 
@@ -396,9 +310,8 @@ impl<'a> Edge {
     car_travel_cost: u16,
     bike_travel_cost: u16,
     walk_travel_cost: u16,
-    transit_travel_cost: u16,
   ) -> Self {
-    let mut s = Self([0; 32]);
+    let mut s = Self([0; 24]);
     s.set_cell_id(cell_id);
     s.set_point_1_node_idx(point_1_node_idx);
     s.set_point_2_node_idx(point_2_node_idx);
@@ -406,7 +319,6 @@ impl<'a> Edge {
     s.set_car_travel_cost(car_travel_cost);
     s.set_bike_travel_cost(bike_travel_cost);
     s.set_walk_travel_cost(walk_travel_cost);
-    s.set_transit_travel_cost(transit_travel_cost);
     s
   }
 
@@ -608,35 +520,6 @@ impl<'a> Edge {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
         self.0[22..].as_mut_ptr(),
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-    }
-  }
-
-  pub fn transit_travel_cost(&self) -> u16 {
-    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    EndianScalar::from_little_endian(unsafe {
-      core::ptr::copy_nonoverlapping(
-        self.0[24..].as_ptr(),
-        mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-      mem.assume_init()
-    })
-  }
-
-  pub fn set_transit_travel_cost(&mut self, x: u16) {
-    let x_le = x.to_little_endian();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    unsafe {
-      core::ptr::copy_nonoverlapping(
-        &x_le as *const _ as *const u8,
-        self.0[24..].as_mut_ptr(),
         core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
       );
     }

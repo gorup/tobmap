@@ -412,7 +412,6 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         let car_cost = if travel_costs[0] > 0.0 { travel_costs[0].round() as u16 } else { 0 };
         let bike_cost = if travel_costs[1] > 0.0 { travel_costs[1].round() as u16 } else { 0 };
         let walk_cost = if travel_costs[2] > 0.0 { travel_costs[2].round() as u16 } else { 0 };
-        let transit_cost = if travel_costs[3] > 0.0 { travel_costs[3].round() as u16 } else { 0 };
         
         // Create edge directly as a struct 
         let edge = Edge::new(
@@ -423,7 +422,6 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
             car_cost,
             bike_cost,
             walk_cost,
-            transit_cost,
         );
         
         edges.push((edge, *start_idx, *end_idx, *start_interaction, *end_interaction, *backwards_allowed));
@@ -548,6 +546,9 @@ pub fn get_graph_blob(buffer: &[u8]) -> schema::tobmapgraph::GraphBlob {
 
 /// Merges two travel cost vectors, taking the better (smaller but valid) cost for each mode
 fn merge_travel_costs(costs1: &[f32], costs2: &[f32]) -> Vec<f32> {
+    // Ensure both vectors have the same length
+    assert_eq!(costs1.len(), costs2.len(), "Travel cost vectors must have the same length");
+    
     costs1.iter().zip(costs2.iter())
         .map(|(&c1, &c2)| {
             if c1 < 0.0 {

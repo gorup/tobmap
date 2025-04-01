@@ -7,7 +7,8 @@ edition = "2024"
 flatbuffers = "*"
 schema = { path = "../schema" }
 s2 = "*"
-svg = "0.14"
+image = "0.24"
+imageproc = "0.23"
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "*"
 thiserror = "*"

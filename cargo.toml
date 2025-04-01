@@ -2,7 +2,7 @@
 members = ["crates/*"]
 
 [workspace.dependencies]
-flatbuffers = "24.3.25"
+flatbuffers = "25.2.10"
 s2 = "0.0.13"
 osmpbfreader = "0.16"
 rayon = "1.8"
