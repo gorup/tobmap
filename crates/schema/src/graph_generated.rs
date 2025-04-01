@@ -328,6 +328,322 @@ impl<'a> Interactions {
 
 }
 
+// struct Edge, aligned to 8
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct Edge(pub [u8; 32]);
+impl Default for Edge { 
+  fn default() -> Self { 
+    Self([0; 32])
+  }
+}
+impl core::fmt::Debug for Edge {
+  fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+    f.debug_struct("Edge")
+      .field("cell_id", &self.cell_id())
+      .field("point_1_node_idx", &self.point_1_node_idx())
+      .field("point_2_node_idx", &self.point_2_node_idx())
+      .field("backwards_allowed", &self.backwards_allowed())
+      .field("car_travel_cost", &self.car_travel_cost())
+      .field("bike_travel_cost", &self.bike_travel_cost())
+      .field("walk_travel_cost", &self.walk_travel_cost())
+      .field("transit_travel_cost", &self.transit_travel_cost())
+      .finish()
+  }
+}
+
+impl flatbuffers::SimpleToVerifyInSlice for Edge {}
+impl<'a> flatbuffers::Follow<'a> for Edge {
+  type Inner = &'a Edge;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    <&'a Edge>::follow(buf, loc)
+  }
+}
+impl<'a> flatbuffers::Follow<'a> for &'a Edge {
+  type Inner = &'a Edge;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    flatbuffers::follow_cast_ref::<Edge>(buf, loc)
+  }
+}
+impl<'b> flatbuffers::Push for Edge {
+    type Output = Edge;
+    #[inline]
+    unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
+        let src = ::core::slice::from_raw_parts(self as *const Edge as *const u8, Self::size());
+        dst.copy_from_slice(src);
+    }
+}
+
+impl<'a> flatbuffers::Verifiable for Edge {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.in_buffer::<Self>(pos)
+  }
+}
+
+impl<'a> Edge {
+  #[allow(clippy::too_many_arguments)]
+  pub fn new(
+    cell_id: u64,
+    point_1_node_idx: u32,
+    point_2_node_idx: u32,
+    backwards_allowed: bool,
+    car_travel_cost: u16,
+    bike_travel_cost: u16,
+    walk_travel_cost: u16,
+    transit_travel_cost: u16,
+  ) -> Self {
+    let mut s = Self([0; 32]);
+    s.set_cell_id(cell_id);
+    s.set_point_1_node_idx(point_1_node_idx);
+    s.set_point_2_node_idx(point_2_node_idx);
+    s.set_backwards_allowed(backwards_allowed);
+    s.set_car_travel_cost(car_travel_cost);
+    s.set_bike_travel_cost(bike_travel_cost);
+    s.set_walk_travel_cost(walk_travel_cost);
+    s.set_transit_travel_cost(transit_travel_cost);
+    s
+  }
+
+  pub fn cell_id(&self) -> u64 {
+    let mut mem = core::mem::MaybeUninit::<<u64 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[0..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u64 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_cell_id(&mut self, x: u64) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[0..].as_mut_ptr(),
+        core::mem::size_of::<<u64 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn point_1_node_idx(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[8..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_point_1_node_idx(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[8..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn point_2_node_idx(&self) -> u32 {
+    let mut mem = core::mem::MaybeUninit::<<u32 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[12..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_point_2_node_idx(&mut self, x: u32) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[12..].as_mut_ptr(),
+        core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn backwards_allowed(&self) -> bool {
+    let mut mem = core::mem::MaybeUninit::<<bool as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[16..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_backwards_allowed(&mut self, x: bool) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[16..].as_mut_ptr(),
+        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn car_travel_cost(&self) -> u16 {
+    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[18..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_car_travel_cost(&mut self, x: u16) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[18..].as_mut_ptr(),
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn bike_travel_cost(&self) -> u16 {
+    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[20..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_bike_travel_cost(&mut self, x: u16) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[20..].as_mut_ptr(),
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn walk_travel_cost(&self) -> u16 {
+    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[22..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_walk_travel_cost(&mut self, x: u16) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[22..].as_mut_ptr(),
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+  pub fn transit_travel_cost(&self) -> u16 {
+    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    EndianScalar::from_little_endian(unsafe {
+      core::ptr::copy_nonoverlapping(
+        self.0[24..].as_ptr(),
+        mem.as_mut_ptr() as *mut u8,
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+      mem.assume_init()
+    })
+  }
+
+  pub fn set_transit_travel_cost(&mut self, x: u16) {
+    let x_le = x.to_little_endian();
+    // Safety:
+    // Created from a valid Table for this object
+    // Which contains a valid value in this slot
+    unsafe {
+      core::ptr::copy_nonoverlapping(
+        &x_le as *const _ as *const u8,
+        self.0[24..].as_mut_ptr(),
+        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+      );
+    }
+  }
+
+}
+
 pub enum NodeOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -459,171 +775,6 @@ impl core::fmt::Debug for Node<'_> {
       ds.finish()
   }
 }
-pub enum EdgeOffset {}
-#[derive(Copy, Clone, PartialEq)]
-
-pub struct Edge<'a> {
-  pub _tab: flatbuffers::Table<'a>,
-}
-
-impl<'a> flatbuffers::Follow<'a> for Edge<'a> {
-  type Inner = Edge<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: flatbuffers::Table::new(buf, loc) }
-  }
-}
-
-impl<'a> Edge<'a> {
-  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_POINT_1_NODE_IDX: flatbuffers::VOffsetT = 6;
-  pub const VT_POINT_2_NODE_IDX: flatbuffers::VOffsetT = 8;
-  pub const VT_BACKWARDS_ALLOWED: flatbuffers::VOffsetT = 10;
-  pub const VT_TRAVEL_COSTS: flatbuffers::VOffsetT = 12;
-
-  #[inline]
-  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
-    Edge { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args EdgeArgs<'args>
-  ) -> flatbuffers::WIPOffset<Edge<'bldr>> {
-    let mut builder = EdgeBuilder::new(_fbb);
-    builder.add_cell_id(args.cell_id);
-    if let Some(x) = args.travel_costs { builder.add_travel_costs(x); }
-    builder.add_point_2_node_idx(args.point_2_node_idx);
-    builder.add_point_1_node_idx(args.point_1_node_idx);
-    builder.add_backwards_allowed(args.backwards_allowed);
-    builder.finish()
-  }
-
-
-  #[inline]
-  pub fn cell_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_CELL_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn point_1_node_idx(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(Edge::VT_POINT_1_NODE_IDX, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn point_2_node_idx(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(Edge::VT_POINT_2_NODE_IDX, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn backwards_allowed(&self) -> bool {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(Edge::VT_BACKWARDS_ALLOWED, Some(false)).unwrap()}
-  }
-  #[inline]
-  pub fn travel_costs(&self) -> Option<flatbuffers::Vector<'a, f32>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, f32>>>(Edge::VT_TRAVEL_COSTS, None)}
-  }
-}
-
-impl flatbuffers::Verifiable for Edge<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut flatbuffers::Verifier, pos: usize
-  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
-    use self::flatbuffers::Verifiable;
-    v.visit_table(pos)?
-     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
-     .visit_field::<u32>("point_1_node_idx", Self::VT_POINT_1_NODE_IDX, false)?
-     .visit_field::<u32>("point_2_node_idx", Self::VT_POINT_2_NODE_IDX, false)?
-     .visit_field::<bool>("backwards_allowed", Self::VT_BACKWARDS_ALLOWED, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("travel_costs", Self::VT_TRAVEL_COSTS, false)?
-     .finish();
-    Ok(())
-  }
-}
-pub struct EdgeArgs<'a> {
-    pub cell_id: u64,
-    pub point_1_node_idx: u32,
-    pub point_2_node_idx: u32,
-    pub backwards_allowed: bool,
-    pub travel_costs: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
-}
-impl<'a> Default for EdgeArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    EdgeArgs {
-      cell_id: 0,
-      point_1_node_idx: 0,
-      point_2_node_idx: 0,
-      backwards_allowed: false,
-      travel_costs: None,
-    }
-  }
-}
-
-pub struct EdgeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
-}
-impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EdgeBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_cell_id(&mut self, cell_id: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_CELL_ID, cell_id, 0);
-  }
-  #[inline]
-  pub fn add_point_1_node_idx(&mut self, point_1_node_idx: u32) {
-    self.fbb_.push_slot::<u32>(Edge::VT_POINT_1_NODE_IDX, point_1_node_idx, 0);
-  }
-  #[inline]
-  pub fn add_point_2_node_idx(&mut self, point_2_node_idx: u32) {
-    self.fbb_.push_slot::<u32>(Edge::VT_POINT_2_NODE_IDX, point_2_node_idx, 0);
-  }
-  #[inline]
-  pub fn add_backwards_allowed(&mut self, backwards_allowed: bool) {
-    self.fbb_.push_slot::<bool>(Edge::VT_BACKWARDS_ALLOWED, backwards_allowed, false);
-  }
-  #[inline]
-  pub fn add_travel_costs(&mut self, travel_costs: flatbuffers::WIPOffset<flatbuffers::Vector<'b , f32>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Edge::VT_TRAVEL_COSTS, travel_costs);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> EdgeBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    EdgeBuilder {
-      fbb_: _fbb,
-      start_: start,
-    }
-  }
-  #[inline]
-  pub fn finish(self) -> flatbuffers::WIPOffset<Edge<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    flatbuffers::WIPOffset::new(o.value())
-  }
-}
-
-impl core::fmt::Debug for Edge<'_> {
-  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let mut ds = f.debug_struct("Edge");
-      ds.field("cell_id", &self.cell_id());
-      ds.field("point_1_node_idx", &self.point_1_node_idx());
-      ds.field("point_2_node_idx", &self.point_2_node_idx());
-      ds.field("backwards_allowed", &self.backwards_allowed());
-      ds.field("travel_costs", &self.travel_costs());
-      ds.finish()
-  }
-}
 pub enum GraphBlobOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
@@ -669,11 +820,11 @@ impl<'a> GraphBlob<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(GraphBlob::VT_NAME, None)}
   }
   #[inline]
-  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge<'a>>>> {
+  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, Edge>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge>>>>(GraphBlob::VT_EDGES, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, Edge>>>(GraphBlob::VT_EDGES, None)}
   }
   #[inline]
   pub fn nodes(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Node<'a>>>> {
@@ -692,7 +843,7 @@ impl flatbuffers::Verifiable for GraphBlob<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("name", Self::VT_NAME, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Edge>>>>("edges", Self::VT_EDGES, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Edge>>>("edges", Self::VT_EDGES, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<Node>>>>("nodes", Self::VT_NODES, false)?
      .finish();
     Ok(())
@@ -700,7 +851,7 @@ impl flatbuffers::Verifiable for GraphBlob<'_> {
 }
 pub struct GraphBlobArgs<'a> {
     pub name: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Edge<'a>>>>>,
+    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Edge>>>,
     pub nodes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<Node<'a>>>>>,
 }
 impl<'a> Default for GraphBlobArgs<'a> {
@@ -724,7 +875,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> GraphBlobBuilder<'a, 'b, A> {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GraphBlob::VT_NAME, name);
   }
   #[inline]
-  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<Edge<'b >>>>) {
+  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , Edge>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(GraphBlob::VT_EDGES, edges);
   }
   #[inline]

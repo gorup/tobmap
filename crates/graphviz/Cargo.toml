@@ -1,0 +1,14 @@
+[package]
+name = "graphviz"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+flatbuffers = "*"
+schema = { path = "../schema" }
+s2 = "*"
+svg = "0.14"
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "*"
+thiserror = "*"
+

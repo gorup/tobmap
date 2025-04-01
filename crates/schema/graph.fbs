@@ -1,13 +1,4 @@
 namespace tobmapgraph;
-
-// Travel modes for edge costs
-enum TravelMode : byte {
-  Car = 0,
-  Bike = 1,
-  Walk = 2,
-  Transit = 3
-}
-
 enum RoadInteraction : byte {
     None = 0,
     Yield = 1,
@@ -31,18 +22,19 @@ table Node {
 }
 
 // An edge represents a way (street, path, etc.) between two nodes
-table Edge {
+struct Edge {
   cell_id:uint64;
-  
+
   point_1_node_idx:uint32;
   point_2_node_idx:uint32;
 
   // Can you go from vertex_2 to vertex_1?
   backwards_allowed:bool;
-  
-  // Travel costs (time in seconds) for different travel modes
-  // A negative value indicates that this mode is not allowed
-  travel_costs:[float];
+
+  // Seconds!
+  car_travel_cost:uint16;
+  bike_travel_cost:uint16;
+  walk_travel_cost:uint16;
 }
 
 table GraphBlob {
@@ -50,6 +42,5 @@ table GraphBlob {
 
     // https://www.youtube.com/watch?v=B7-_hb28Wmk
     edges:[Edge];
-
     nodes:[Node];
 }

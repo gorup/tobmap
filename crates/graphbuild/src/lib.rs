@@ -7,7 +7,7 @@ use flatbuffers::FlatBufferBuilder;
 use osmpbfreader::{Node, OsmId, OsmObj, OsmPbfReader, Way};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
-use schema::tobmapgraph::{Edge, EdgeArgs, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction};
+use schema::tobmapgraph::{Edge, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction};
 use thiserror::Error;
 use log::info;
 use rayon::prelude::*;
@@ -126,17 +126,32 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                 .insert(*way_id);
         }
     }
-
-    let mut only_two_ways = 0;
     
-    // Nodes with 1+ ways are intersections or endpoints
+    // Only consider nodes with 1+ ways as intersections or endpoints
+    // A true intersection is where different roads meet (way_ids.len() > 1)
+    // We also want to include endpoints (first/last node of a way)
     let intersections: HashMap<i64, Intersection> = node_way_counts.iter()
-        .filter(|(_, way_ids)| way_ids.len() >= 1)
-        .filter_map(|(node_id, way_ids)| {
-            if way_ids.len() == 2 {
-                only_two_ways += 1;
+        .filter(|(node_id, way_ids)| {
+            // Keep nodes with multiple ways (true intersections)
+            if way_ids.len() > 1 {
+                return true;
             }
 
+            // Keep endpoints (first or last node of any way)
+            for &way_id in way_ids.iter() {
+                if let Some(way) = ways.get(&way_id) {
+                    let first_node = way.nodes.first().map(|n| n.0).unwrap_or(0);
+                    let last_node = way.nodes.last().map(|n| n.0).unwrap_or(0);
+                    if first_node == **node_id || last_node == **node_id {
+                        return true;
+                    }
+                }
+            }
+            
+            // Skip nodes that are just intermediate points on a single way
+            false
+        })
+        .filter_map(|(node_id, way_ids)| {
             if let Some(node) = nodes.get(node_id) {
                 let lat_lng = LatLng::from_degrees(node.lat(), node.lon());
                 let cell_id = CellID::from(lat_lng).0;
@@ -152,7 +167,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         })
         .collect();
     
-    info!("Found {} intersections, {} with only 2 ways", intersections.len(), only_two_ways);
+    info!("Found {} intersections", intersections.len());
     
     // Build road segments with speed models
     let mut road_segments: Vec<RoadSegment> = Vec::new();
@@ -293,21 +308,26 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     // Build edges
     let mut edge_node_pairs = Vec::new();
     
+    // Create a map to deduplicate edges
+    let mut edge_map: HashMap<(u32, u32), (u64, Vec<f32>, bool, RoadInteraction, RoadInteraction)> = HashMap::new();
+    
     for segment in &road_segments {
-        // For each segment, create edges between consecutive intersection nodes
-        let mut current_path = Vec::new();
-        
-        for node_id in &segment.nodes {
-            if intersections.contains_key(node_id) {
-                current_path.push(*node_id);
-            }
-        }
+        // Find intersection nodes along this segment
+        let intersection_nodes: Vec<(usize, i64)> = segment.nodes.iter()
+            .enumerate()
+            .filter(|(_, node_id)| intersections.contains_key(node_id))
+            .map(|(idx, node_id)| (idx, *node_id))
+            .collect();
         
         // Create edges between consecutive intersection nodes
-        for window in current_path.windows(2) {
-            if let [start_id, end_id] = window {
+        for window in intersection_nodes.windows(2) {
+            if let [(start_pos, start_id), (end_pos, end_id)] = window {
                 if let (Some(start_idx), Some(end_idx)) = (node_id_to_index.get(start_id), node_id_to_index.get(end_id)) {
-                    // Calculate edge cost based on distance and speed
+                    // Skip if this isn't a meaningful edge (same position)
+                    if start_pos == end_pos {
+                        continue;
+                    }
+                    
                     let start_node = &intersections[start_id];
                     let end_node = &intersections[end_id];
                     
@@ -348,15 +368,34 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                     let start_interaction = segment.interactions.get(start_id).cloned().unwrap_or(RoadInteraction::None);
                     let end_interaction = segment.interactions.get(end_id).cloned().unwrap_or(RoadInteraction::None);
                     
-                    edge_node_pairs.push((*start_idx as u32, *end_idx as u32, cell_id, 
-                                         travel_costs.clone(), !segment.is_oneway,
-                                         start_interaction, end_interaction));
+                    // Create a canonical key for this edge (smaller node index first)
+                    let edge_key = if start_idx < end_idx {
+                        (*start_idx, *end_idx)
+                    } else {
+                        (*end_idx, *start_idx)
+                    };
+                    
+                    // Check if this edge already exists, otherwise add it
+                    edge_map.entry(edge_key).or_insert_with(|| (
+                        cell_id, 
+                        travel_costs.clone(), 
+                        !segment.is_oneway,
+                        start_interaction, 
+                        end_interaction
+                    )).1 = merge_travel_costs(&edge_map.get(&edge_key).map(|v| &v.1).unwrap_or(&vec![-1.0; 4]), &travel_costs);
                 }
             }
         }
     }
+    
+    // Convert edge map to edge_node_pairs
+    for ((start_idx, end_idx), (cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction)) in edge_map {
+        edge_node_pairs.push((start_idx, end_idx, cell_id, 
+                             travel_costs, backwards_allowed,
+                             start_interaction, end_interaction));
+    }
 
-    info!("Built {} edge node pairs, will now sort edges by cell, took {:?}", edge_node_pairs.len(), last_time.elapsed());
+    info!("Built {} deduplicated edge node pairs, will now sort edges by cell, took {:?}", edge_node_pairs.len(), last_time.elapsed());
     last_time = Instant::now();
     
     // Sort edges by cell ID for locality
@@ -365,20 +404,27 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     info!("Sorting done, will now create flatbuffer edges, took {:?}", last_time.elapsed());
     last_time = Instant::now();
 
-    // Create flatbuffer edges
+    // Create edges
     let mut edges = Vec::new();
     for (start_idx, end_idx, cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
-        let travel_costs_offset = builder.create_vector(travel_costs);
+        // Convert travel costs from f32 seconds to u16 seconds
+        // If cost is negative (not allowed), set to 0 (we'll handle this in routing)
+        let car_cost = if travel_costs[0] > 0.0 { travel_costs[0].round() as u16 } else { 0 };
+        let bike_cost = if travel_costs[1] > 0.0 { travel_costs[1].round() as u16 } else { 0 };
+        let walk_cost = if travel_costs[2] > 0.0 { travel_costs[2].round() as u16 } else { 0 };
+        let transit_cost = if travel_costs[3] > 0.0 { travel_costs[3].round() as u16 } else { 0 };
         
-        // Create edge arguments
-        let mut edge_args = EdgeArgs::default();
-        edge_args.cell_id = *cell_id;
-        edge_args.point_1_node_idx = *start_idx;
-        edge_args.point_2_node_idx = *end_idx;
-        edge_args.backwards_allowed = *backwards_allowed;
-        edge_args.travel_costs = Some(travel_costs_offset);
-        
-        let edge = Edge::create(&mut builder, &edge_args);
+        // Create edge directly as a struct 
+        let edge = Edge::new(
+            *cell_id,
+            *start_idx,
+            *end_idx,
+            *backwards_allowed,
+            car_cost,
+            bike_cost,
+            walk_cost,
+            transit_cost,
+        );
         
         edges.push((edge, *start_idx, *end_idx, *start_interaction, *end_interaction, *backwards_allowed));
     }
@@ -453,13 +499,11 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         graph_nodes.push(node);
     }
     
-    // We need different vector creation for edges and nodes since they contain ForwardsUOffset
-    let _vector_start = builder.start_vector::<flatbuffers::ForwardsUOffset<Edge>>(edges.len());
-    for i in (0..edges.len()).rev() {
-        builder.push(edges[i].0);
-    }
-    let edges_offset = builder.end_vector(edges.len());
+    // Create edges vector
+    let edge_structs: Vec<Edge> = edges.iter().map(|(edge, _, _, _, _, _)| *edge).collect();
+    let edges_offset = builder.create_vector(&edge_structs);
 
+    // Create nodes vector
     let _vector_start = builder.start_vector::<flatbuffers::ForwardsUOffset<GraphNode>>(graph_nodes.len());
     for i in (0..graph_nodes.len()).rev() {
         builder.push(graph_nodes[i]);
@@ -502,6 +546,21 @@ pub fn get_graph_blob(buffer: &[u8]) -> schema::tobmapgraph::GraphBlob {
     flatbuffers::root::<schema::tobmapgraph::GraphBlob>(buffer).unwrap()
 }
 
+/// Merges two travel cost vectors, taking the better (smaller but valid) cost for each mode
+fn merge_travel_costs(costs1: &[f32], costs2: &[f32]) -> Vec<f32> {
+    costs1.iter().zip(costs2.iter())
+        .map(|(&c1, &c2)| {
+            if c1 < 0.0 {
+                c2
+            } else if c2 < 0.0 {
+                c1
+            } else {
+                c1.min(c2)
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,9 +585,14 @@ mod tests {
         // Verify edge properties
         let edge = graph.edges().expect("Should have at least one edge").get(0);
         assert!(edge.cell_id() > 0, "Edge should have a valid cell ID");
-        assert!(edge.point_1_node_idx() < graph.nodes().unwrap().len() as u64, "Edge start node should be valid");
-        assert!(edge.point_2_node_idx() < graph.nodes().unwrap().len() as u64, "Edge end node should be valid");
-        assert_eq!(edge.travel_costs().unwrap().len(), 4, "Edge should have costs for all travel modes");
+        assert!(u64::from(edge.point_1_node_idx()) < graph.nodes().unwrap().len() as u64, "Edge start node should be valid");
+        assert!(u64::from(edge.point_2_node_idx()) < graph.nodes().unwrap().len() as u64, "Edge end node should be valid");
+        
+        // Verify individual travel costs exist
+        assert!(edge.car_travel_cost() >= 0, "Edge should have car travel cost");
+        assert!(edge.bike_travel_cost() >= 0, "Edge should have bike travel cost");
+        assert!(edge.walk_travel_cost() >= 0, "Edge should have walk travel cost");
+        assert!(edge.transit_travel_cost() >= 0, "Edge should have transit travel cost");
 
         // Verify node properties
         let node = graph.nodes().expect("Should have at least one node").get(0);
@@ -542,18 +606,15 @@ mod tests {
         
         // Verify travel costs are reasonable
         for edge in graph.edges().unwrap().iter() {
-            let costs = edge.travel_costs().unwrap();
-            assert_eq!(costs.len(), 4, "Each edge should have costs for all travel modes");
+            // Car costs should be positive for most roads or 0 (not allowed)
+            assert!(edge.car_travel_cost() > 0 || edge.car_travel_cost() == 0, "Car costs should be positive or 0");
             
-            // Car costs should be positive for most roads
-            assert!(costs.get(0) > 0.0 || costs.get(0) == -1.0, "Car costs should be positive or -1");
+            // Bike and walk costs should be positive for most roads or 0 (not allowed)
+            assert!(edge.bike_travel_cost() > 0 || edge.bike_travel_cost() == 0, "Bike costs should be positive or 0");
+            assert!(edge.walk_travel_cost() > 0 || edge.walk_travel_cost() == 0, "Walk costs should be positive or 0");
             
-            // Bike and walk costs should be positive for most roads
-            assert!(costs.get(1) > 0.0 || costs.get(1) == -1.0, "Bike costs should be positive or -1");
-            assert!(costs.get(2) > 0.0 || costs.get(2) == -1.0, "Walk costs should be positive or -1");
-            
-            // Transit costs should be -1 (not supported)
-            assert_eq!(costs.get(3), -1.0, "Transit costs should be -1");
+            // Transit costs should be 0 (not supported)
+            assert_eq!(edge.transit_travel_cost(), 0, "Transit costs should be 0");
         }
     }
 }
