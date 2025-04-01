@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::path::Path;
+use std::time::Instant;
 
 use flatbuffers::FlatBufferBuilder;
 use osmpbfreader::{Node, OsmId, OsmObj, OsmPbfReader, Way};
@@ -8,7 +9,9 @@ use s2::cellid::CellID;
 use s2::latlng::LatLng;
 use schema::tobmapgraph::{Edge, EdgeArgs, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction};
 use thiserror::Error;
-use indicatif::{ProgressBar, ProgressStyle};
+use log::info;
+use rayon::prelude::*;
+
 
 #[derive(Error, Debug)]
 pub enum GraphBuildError {
@@ -71,18 +74,15 @@ struct RoadSegment {
 /// * `StatusOr<Vec<u8>>` - Result containing the serialized graph data or an error
 pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     let mut reader = OsmPbfReader::new(std::io::Cursor::new(osm_data));
+
+    let mut last_time = Instant::now();
     
-    println!("Reading OSM data...");
-    let progress = ProgressBar::new_spinner();
-    progress.set_style(ProgressStyle::default_spinner()
-        .template("{spinner:.green} {msg}")
-        .unwrap());
-    progress.set_message("Processing OSM data...");
+    info!("Reading OSM data...");
     
     // Use get_objs_and_deps to get all highways and their nodes in a single pass
     let road_tags = &["highway", "road", "street", "primary", "secondary", "tertiary", "residential", "service", "trunk"];
 
-    progress.set_message("Loading highways and nodes...");
+    info!("Loading highways and nodes...");
     let objects = reader.get_objs_and_deps(|obj| {
         match obj {
             OsmObj::Way(way) => way.tags.keys().any(|tag| road_tags.contains(&tag.as_str())),
@@ -114,7 +114,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         }
     }
     
-    progress.set_message(format!("Found {} ways and {} nodes", ways.len(), nodes.len()));
+    info!("Found {} ways and {} nodes", ways.len(), nodes.len());
     
     // Find intersections (nodes where multiple ways meet)
     let mut node_way_counts: HashMap<i64, HashSet<i64>> = HashMap::new();
@@ -146,7 +146,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         })
         .collect();
     
-    progress.set_message(format!("Found {} intersections", intersections.len()));
+    info!("Found {} intersections", intersections.len());
     
     // Build road segments with speed models
     let mut road_segments: Vec<RoadSegment> = Vec::new();
@@ -263,15 +263,19 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         });
     }
     
-    progress.set_message(format!("Built {} road segments", road_segments.len()));
-    
+    info!("Built {} road segments, will sort intersections by cell (took {:?})", road_segments.len(), last_time.elapsed());
+    last_time = Instant::now();
+
     // Convert to GraphBlob format
     // First build a map of node IDs to their index in the final array
     let mut intersections_vec: Vec<(&i64, &Intersection)> = intersections.iter().collect();
     
     // Sort nodes by cell ID for locality
-    intersections_vec.sort_by_key(|(_, intersection)| intersection.cell_id);
+    intersections_vec.par_sort_by_key(|(_, intersection)| CellID(intersection.cell_id).to_token());
     
+    info!("Sorting done intersections by cell, will now build edges, took {:?}", last_time.elapsed());
+    last_time = Instant::now();
+
     let node_id_to_index: HashMap<i64, usize> = intersections_vec.iter()
         .enumerate()
         .map(|(idx, (node_id, _))| (**node_id, idx))
@@ -281,7 +285,6 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     let mut builder = FlatBufferBuilder::new();
     
     // Build edges
-    let mut edges = Vec::new();
     let mut edge_node_pairs = Vec::new();
     
     for segment in &road_segments {
@@ -302,8 +305,15 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                     let start_node = &intersections[start_id];
                     let end_node = &intersections[end_id];
                     
-                    // Get S2 distance in meters
+                    // Get S2 distance in meters (radius earth meters)
                     let distance_meters = start_node.location.distance(&end_node.location).rad() * 6371000.0;
+                    
+                    // Calculate midpoint lat/lng and convert to cell ID
+                    let midpoint = LatLng::from_degrees(
+                        (start_node.location.lat.deg() + end_node.location.lat.deg()) / 2.0,
+                        (start_node.location.lng.deg() + end_node.location.lng.deg()) / 2.0
+                    );
+                    let cell_id = CellID::from(midpoint).0;
                     
                     // Calculate travel costs for each mode
                     let mut travel_costs = vec![-1.0, -1.0, -1.0, -1.0]; // Default: not allowed
@@ -328,9 +338,6 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                     
                     // Transit not supported in this implementation
                     
-                    // Cell ID will be the average of the two nodes
-                    let cell_id = (start_node.cell_id + end_node.cell_id) / 2;
-                    
                     // Get road interactions
                     let start_interaction = segment.interactions.get(start_id).cloned().unwrap_or(RoadInteraction::None);
                     let end_interaction = segment.interactions.get(end_id).cloned().unwrap_or(RoadInteraction::None);
@@ -342,11 +349,18 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
             }
         }
     }
+
+    info!("Built {} edge node pairs, will now sort edges by cell, took {:?}", edge_node_pairs.len(), last_time.elapsed());
+    last_time = Instant::now();
     
     // Sort edges by cell ID for locality
-    edge_node_pairs.sort_by_key(|(_, _, cell_id, _, _, _, _)| *cell_id);
+    edge_node_pairs.par_sort_by_key(|(_, _, cell_id, _, _, _, _)| CellID(*cell_id).to_token());
  
+    info!("Sorting done, will now create flatbuffer edges, took {:?}", last_time.elapsed());
+    last_time = Instant::now();
+
     // Create flatbuffer edges
+    let mut edges = Vec::new();
     for (start_idx, end_idx, cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
         let travel_costs_offset = builder.create_vector(travel_costs);
         
@@ -363,31 +377,48 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         edges.push((edge, *start_idx, *end_idx, *start_interaction, *end_interaction, *backwards_allowed));
     }
     
+    info!("Built {} edges, will now build nodes with edges, took {:?}", edges.len(), last_time.elapsed());
+    last_time = Instant::now();
+
     // Build nodes with edge references
     let mut nodes_with_edges: Vec<(i64, u64, Vec<usize>, Vec<(RoadInteraction, RoadInteraction)>)> = 
         intersections_vec.iter()
         .map(|(node_id, intersection)| (**node_id, intersection.cell_id, Vec::new(), Vec::new()))
         .collect();
+
+    info!("Built nodes with edges, will now add edge references, edges num {} nodes_with_edges num {} took {:?}", edges.len(), nodes_with_edges.len(), last_time.elapsed());
+    last_time = Instant::now();
     
-    // Add edge references to nodes
+    // Create a map from node index to position in nodes_with_edges
+    let node_to_pos: HashMap<usize, usize> = nodes_with_edges.iter()
+        .enumerate()
+        .map(|(pos, (node_id, _, _, _))| (node_id_to_index[node_id], pos))
+        .collect();
+
+    // Add edge references to nodes using direct map access
     for (edge_idx, (_, start_idx, end_idx, start_interaction, end_interaction, backwards_allowed)) in edges.iter().enumerate() {
-        // Find the corresponding nodes_with_edges entry
-        for node_entry in &mut nodes_with_edges {
-            if node_id_to_index[&node_entry.0] == *start_idx as usize {
-                node_entry.2.push(edge_idx);
-                node_entry.3.push((*start_interaction, *end_interaction));
-            }
-            
-            if node_id_to_index[&node_entry.0] == *end_idx as usize && *backwards_allowed {
-                node_entry.2.push(edge_idx);
-                node_entry.3.push((*end_interaction, *start_interaction));
+        if let Some(&start_pos) = node_to_pos.get(&(*start_idx as usize)) {
+            nodes_with_edges[start_pos].2.push(edge_idx);
+            nodes_with_edges[start_pos].3.push((*start_interaction, *end_interaction));
+        }
+        
+        if *backwards_allowed {
+            if let Some(&end_pos) = node_to_pos.get(&(*end_idx as usize)) {
+                nodes_with_edges[end_pos].2.push(edge_idx);
+                nodes_with_edges[end_pos].3.push((*end_interaction, *start_interaction));
             }
         }
     }
     
-    // Sort nodes by cell ID (again, for safety)
-    nodes_with_edges.sort_by_key(|(_, cell_id, _, _)| *cell_id);
+    info!("Added edge references to nodes, will now sort nodes_with_edges by cell, took {:?}", last_time.elapsed());
+    last_time = Instant::now();
     
+    // Sort nodes by cell ID (again, for safety)
+    nodes_with_edges.par_sort_by_key(|(_, cell_id, _, _)| CellID(*cell_id).to_token());
+    
+    info!("Sorting done, now create flatbuffer things, took {:?}", last_time.elapsed());
+    last_time = Instant::now();
+
     // Create FlatBuffer nodes
     let mut graph_nodes = Vec::with_capacity(nodes_with_edges.len());
     
@@ -429,6 +460,9 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     }
     let nodes_offset = builder.end_vector(graph_nodes.len());
     
+    info!("Done, now wrapping up, took {:?}", last_time.elapsed());
+    last_time = Instant::now();
+
     // Create graph blob name
     let name_offset = builder.create_string("OSM Generated Graph");
     
@@ -443,7 +477,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     
     builder.finish(graph_blob, None);
     
-    progress.finish_with_message("Graph building complete!");
+    info!("Graph building complete!");
     
     // Return serialized data
     let finished_data = builder.finished_data().to_vec();
