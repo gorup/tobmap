@@ -7,3 +7,4 @@ edition = "2024"
 flatbuffers = "*"
 s2 = "*"
 schema = { path = "../schema" }
+rkyv = { version = "0.7.42", features = ["validation"] }
