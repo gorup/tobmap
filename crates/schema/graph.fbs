@@ -26,7 +26,7 @@ table Node {
 
   // related edges, with their interactions for 
   // incoming, outgoing pairs
-  edges:[uint64];
+  edges:[uint32];
   interactions:[Interactions];
 }
 
@@ -34,8 +34,8 @@ table Node {
 table Edge {
   cell_id:uint64;
   
-  point_1_node_idx:uint64;
-  point_2_node_idx:uint64;
+  point_1_node_idx:uint32;
+  point_2_node_idx:uint32;
 
   // Can you go from vertex_2 to vertex_1?
   backwards_allowed:bool;

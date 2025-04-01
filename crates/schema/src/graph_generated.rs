@@ -241,12 +241,8 @@ impl<'b> flatbuffers::Push for Interactions {
     type Output = Interactions;
     #[inline]
     unsafe fn push(&self, dst: &mut [u8], _written_len: usize) {
-        let src = ::core::slice::from_raw_parts(self as *const Interactions as *const u8, <Self as flatbuffers::Push>::size());
+        let src = ::core::slice::from_raw_parts(self as *const Interactions as *const u8, Self::size());
         dst.copy_from_slice(src);
-    }
-    #[inline]
-    fn alignment() -> flatbuffers::PushAlignment {
-        flatbuffers::PushAlignment::new(1)
     }
 }
 
@@ -377,11 +373,11 @@ impl<'a> Node<'a> {
     unsafe { self._tab.get::<u64>(Node::VT_CELL_ID, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, u64>> {
+  pub fn edges(&self) -> Option<flatbuffers::Vector<'a, u32>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(Node::VT_EDGES, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(Node::VT_EDGES, None)}
   }
   #[inline]
   pub fn interactions(&self) -> Option<flatbuffers::Vector<'a, Interactions>> {
@@ -400,7 +396,7 @@ impl flatbuffers::Verifiable for Node<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("edges", Self::VT_EDGES, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("edges", Self::VT_EDGES, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Interactions>>>("interactions", Self::VT_INTERACTIONS, false)?
      .finish();
     Ok(())
@@ -408,7 +404,7 @@ impl flatbuffers::Verifiable for Node<'_> {
 }
 pub struct NodeArgs<'a> {
     pub cell_id: u64,
-    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
+    pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub interactions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Interactions>>>,
 }
 impl<'a> Default for NodeArgs<'a> {
@@ -432,7 +428,7 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NodeBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u64>(Node::VT_CELL_ID, cell_id, 0);
   }
   #[inline]
-  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u64>>) {
+  pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u32>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_EDGES, edges);
   }
   #[inline]
@@ -495,10 +491,10 @@ impl<'a> Edge<'a> {
     args: &'args EdgeArgs<'args>
   ) -> flatbuffers::WIPOffset<Edge<'bldr>> {
     let mut builder = EdgeBuilder::new(_fbb);
-    builder.add_point_2_node_idx(args.point_2_node_idx);
-    builder.add_point_1_node_idx(args.point_1_node_idx);
     builder.add_cell_id(args.cell_id);
     if let Some(x) = args.travel_costs { builder.add_travel_costs(x); }
+    builder.add_point_2_node_idx(args.point_2_node_idx);
+    builder.add_point_1_node_idx(args.point_1_node_idx);
     builder.add_backwards_allowed(args.backwards_allowed);
     builder.finish()
   }
@@ -512,18 +508,18 @@ impl<'a> Edge<'a> {
     unsafe { self._tab.get::<u64>(Edge::VT_CELL_ID, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn point_1_node_idx(&self) -> u64 {
+  pub fn point_1_node_idx(&self) -> u32 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_POINT_1_NODE_IDX, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u32>(Edge::VT_POINT_1_NODE_IDX, Some(0)).unwrap()}
   }
   #[inline]
-  pub fn point_2_node_idx(&self) -> u64 {
+  pub fn point_2_node_idx(&self) -> u32 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Edge::VT_POINT_2_NODE_IDX, Some(0)).unwrap()}
+    unsafe { self._tab.get::<u32>(Edge::VT_POINT_2_NODE_IDX, Some(0)).unwrap()}
   }
   #[inline]
   pub fn backwards_allowed(&self) -> bool {
@@ -549,8 +545,8 @@ impl flatbuffers::Verifiable for Edge<'_> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
      .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
-     .visit_field::<u64>("point_1_node_idx", Self::VT_POINT_1_NODE_IDX, false)?
-     .visit_field::<u64>("point_2_node_idx", Self::VT_POINT_2_NODE_IDX, false)?
+     .visit_field::<u32>("point_1_node_idx", Self::VT_POINT_1_NODE_IDX, false)?
+     .visit_field::<u32>("point_2_node_idx", Self::VT_POINT_2_NODE_IDX, false)?
      .visit_field::<bool>("backwards_allowed", Self::VT_BACKWARDS_ALLOWED, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, f32>>>("travel_costs", Self::VT_TRAVEL_COSTS, false)?
      .finish();
@@ -559,8 +555,8 @@ impl flatbuffers::Verifiable for Edge<'_> {
 }
 pub struct EdgeArgs<'a> {
     pub cell_id: u64,
-    pub point_1_node_idx: u64,
-    pub point_2_node_idx: u64,
+    pub point_1_node_idx: u32,
+    pub point_2_node_idx: u32,
     pub backwards_allowed: bool,
     pub travel_costs: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, f32>>>,
 }
@@ -587,12 +583,12 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EdgeBuilder<'a, 'b, A> {
     self.fbb_.push_slot::<u64>(Edge::VT_CELL_ID, cell_id, 0);
   }
   #[inline]
-  pub fn add_point_1_node_idx(&mut self, point_1_node_idx: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_POINT_1_NODE_IDX, point_1_node_idx, 0);
+  pub fn add_point_1_node_idx(&mut self, point_1_node_idx: u32) {
+    self.fbb_.push_slot::<u32>(Edge::VT_POINT_1_NODE_IDX, point_1_node_idx, 0);
   }
   #[inline]
-  pub fn add_point_2_node_idx(&mut self, point_2_node_idx: u64) {
-    self.fbb_.push_slot::<u64>(Edge::VT_POINT_2_NODE_IDX, point_2_node_idx, 0);
+  pub fn add_point_2_node_idx(&mut self, point_2_node_idx: u32) {
+    self.fbb_.push_slot::<u32>(Edge::VT_POINT_2_NODE_IDX, point_2_node_idx, 0);
   }
   #[inline]
   pub fn add_backwards_allowed(&mut self, backwards_allowed: bool) {

@@ -276,9 +276,9 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     info!("Sorting done intersections by cell, will now build edges, took {:?}", last_time.elapsed());
     last_time = Instant::now();
 
-    let node_id_to_index: HashMap<i64, usize> = intersections_vec.iter()
+    let node_id_to_index: HashMap<i64, u32> = intersections_vec.iter()
         .enumerate()
-        .map(|(idx, (node_id, _))| (**node_id, idx))
+        .map(|(idx, (node_id, _))| (**node_id, idx as u32))
         .collect();
     
     // Create FlatBufferBuilder
@@ -342,7 +342,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                     let start_interaction = segment.interactions.get(start_id).cloned().unwrap_or(RoadInteraction::None);
                     let end_interaction = segment.interactions.get(end_id).cloned().unwrap_or(RoadInteraction::None);
                     
-                    edge_node_pairs.push((*start_idx as u64, *end_idx as u64, cell_id, 
+                    edge_node_pairs.push((*start_idx as u32, *end_idx as u32, cell_id, 
                                          travel_costs.clone(), !segment.is_oneway,
                                          start_interaction, end_interaction));
                 }
@@ -390,22 +390,22 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     last_time = Instant::now();
     
     // Create a map from node index to position in nodes_with_edges
-    let node_to_pos: HashMap<usize, usize> = nodes_with_edges.iter()
+    let node_to_pos: HashMap<u32, u32> = nodes_with_edges.iter()
         .enumerate()
-        .map(|(pos, (node_id, _, _, _))| (node_id_to_index[node_id], pos))
+        .map(|(pos, (node_id, _, _, _))| (node_id_to_index[node_id], pos as u32))
         .collect();
 
     // Add edge references to nodes using direct map access
     for (edge_idx, (_, start_idx, end_idx, start_interaction, end_interaction, backwards_allowed)) in edges.iter().enumerate() {
-        if let Some(&start_pos) = node_to_pos.get(&(*start_idx as usize)) {
-            nodes_with_edges[start_pos].2.push(edge_idx);
-            nodes_with_edges[start_pos].3.push((*start_interaction, *end_interaction));
+        if let Some(&start_pos) = node_to_pos.get(&(*start_idx as u32)) {
+            nodes_with_edges[start_pos as usize].2.push(edge_idx);
+            nodes_with_edges[start_pos as usize].3.push((*start_interaction, *end_interaction));
         }
         
         if *backwards_allowed {
-            if let Some(&end_pos) = node_to_pos.get(&(*end_idx as usize)) {
-                nodes_with_edges[end_pos].2.push(edge_idx);
-                nodes_with_edges[end_pos].3.push((*end_interaction, *start_interaction));
+            if let Some(&end_pos) = node_to_pos.get(&(*end_idx as u32)) {
+                nodes_with_edges[end_pos as usize].2.push(edge_idx);
+                nodes_with_edges[end_pos as usize].3.push((*end_interaction, *start_interaction));
             }
         }
     }
@@ -423,8 +423,8 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     let mut graph_nodes = Vec::with_capacity(nodes_with_edges.len());
     
     for (_, cell_id, edge_indices, interactions) in nodes_with_edges {
-        let edge_indices_u64: Vec<u64> = edge_indices.iter().map(|&i| i as u64).collect();
-        let edge_indices_offset = builder.create_vector(&edge_indices_u64);
+        let edge_indices_u32: Vec<u32> = edge_indices.iter().map(|&i| i as u32).collect();
+        let edge_indices_offset = builder.create_vector(&edge_indices_u32);
         
         let interaction_objects: Vec<Interactions> = interactions.iter()
             .map(|(incoming, outgoing)| {
@@ -460,7 +460,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     }
     let nodes_offset = builder.end_vector(graph_nodes.len());
     
-    info!("Done, now wrapping up, took {:?}", last_time.elapsed());
+    info!("Done, now wrapping up, edges num {} nodes num {} took {:?}", edges.len(), graph_nodes.len(), last_time.elapsed());
     last_time = Instant::now();
 
     // Create graph blob name
