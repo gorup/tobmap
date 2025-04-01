@@ -1,16 +1,14 @@
 namespace tobmapsnap;
 
 table SnapBucket {
-   // Serialized kdtree!
-   serialized_kdtree:[byte];
-
-   //  The kdtree's value is the edge index in the graph, i.e.
-   // GraphBlob.edges[edge_index]
+   cell_id:uint64;
+   
+   // Parellel arrays, first is sorted so you can binary search it, then you look at the second
+   // to know which edge it is.
+   edge_cell_ids:[uint64];
+   edge_indexes:[uint32];
 }
 
-// A blob of snap buckets at some level, likely level 1, 2, or 3.
-table SnapBlob {
-    cell_id:uint64;
-    snap_bucket_level:uint8; // probably 12
-    snap_buckets:[SnapBucket]; // All of the buckets at that level even if empty
+table SnapBuckets {
+    snap_buckets:[SnapBucket];
 }

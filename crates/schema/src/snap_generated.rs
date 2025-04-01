@@ -34,7 +34,9 @@ impl<'a> flatbuffers::Follow<'a> for SnapBucket<'a> {
 }
 
 impl<'a> SnapBucket<'a> {
-  pub const VT_SERIALIZED_KDTREE: flatbuffers::VOffsetT = 4;
+  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
+  pub const VT_EDGE_CELL_IDS: flatbuffers::VOffsetT = 6;
+  pub const VT_EDGE_INDEXES: flatbuffers::VOffsetT = 8;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -46,17 +48,33 @@ impl<'a> SnapBucket<'a> {
     args: &'args SnapBucketArgs<'args>
   ) -> flatbuffers::WIPOffset<SnapBucket<'bldr>> {
     let mut builder = SnapBucketBuilder::new(_fbb);
-    if let Some(x) = args.serialized_kdtree { builder.add_serialized_kdtree(x); }
+    builder.add_cell_id(args.cell_id);
+    if let Some(x) = args.edge_indexes { builder.add_edge_indexes(x); }
+    if let Some(x) = args.edge_cell_ids { builder.add_edge_cell_ids(x); }
     builder.finish()
   }
 
 
   #[inline]
-  pub fn serialized_kdtree(&self) -> Option<flatbuffers::Vector<'a, i8>> {
+  pub fn cell_id(&self) -> u64 {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, i8>>>(SnapBucket::VT_SERIALIZED_KDTREE, None)}
+    unsafe { self._tab.get::<u64>(SnapBucket::VT_CELL_ID, Some(0)).unwrap()}
+  }
+  #[inline]
+  pub fn edge_cell_ids(&self) -> Option<flatbuffers::Vector<'a, u64>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u64>>>(SnapBucket::VT_EDGE_CELL_IDS, None)}
+  }
+  #[inline]
+  pub fn edge_indexes(&self) -> Option<flatbuffers::Vector<'a, u32>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, u32>>>(SnapBucket::VT_EDGE_INDEXES, None)}
   }
 }
 
@@ -67,19 +85,25 @@ impl flatbuffers::Verifiable for SnapBucket<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, i8>>>("serialized_kdtree", Self::VT_SERIALIZED_KDTREE, false)?
+     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u64>>>("edge_cell_ids", Self::VT_EDGE_CELL_IDS, false)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("edge_indexes", Self::VT_EDGE_INDEXES, false)?
      .finish();
     Ok(())
   }
 }
 pub struct SnapBucketArgs<'a> {
-    pub serialized_kdtree: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, i8>>>,
+    pub cell_id: u64,
+    pub edge_cell_ids: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u64>>>,
+    pub edge_indexes: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
 }
 impl<'a> Default for SnapBucketArgs<'a> {
   #[inline]
   fn default() -> Self {
     SnapBucketArgs {
-      serialized_kdtree: None,
+      cell_id: 0,
+      edge_cell_ids: None,
+      edge_indexes: None,
     }
   }
 }
@@ -90,8 +114,16 @@ pub struct SnapBucketBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SnapBucketBuilder<'a, 'b, A> {
   #[inline]
-  pub fn add_serialized_kdtree(&mut self, serialized_kdtree: flatbuffers::WIPOffset<flatbuffers::Vector<'b , i8>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SnapBucket::VT_SERIALIZED_KDTREE, serialized_kdtree);
+  pub fn add_cell_id(&mut self, cell_id: u64) {
+    self.fbb_.push_slot::<u64>(SnapBucket::VT_CELL_ID, cell_id, 0);
+  }
+  #[inline]
+  pub fn add_edge_cell_ids(&mut self, edge_cell_ids: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u64>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SnapBucket::VT_EDGE_CELL_IDS, edge_cell_ids);
+  }
+  #[inline]
+  pub fn add_edge_indexes(&mut self, edge_indexes: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u32>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SnapBucket::VT_EDGE_INDEXES, edge_indexes);
   }
   #[inline]
   pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SnapBucketBuilder<'a, 'b, A> {
@@ -111,137 +143,105 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SnapBucketBuilder<'a, 'b, A> {
 impl core::fmt::Debug for SnapBucket<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("SnapBucket");
-      ds.field("serialized_kdtree", &self.serialized_kdtree());
+      ds.field("cell_id", &self.cell_id());
+      ds.field("edge_cell_ids", &self.edge_cell_ids());
+      ds.field("edge_indexes", &self.edge_indexes());
       ds.finish()
   }
 }
-pub enum SnapBlobOffset {}
+pub enum SnapBucketsOffset {}
 #[derive(Copy, Clone, PartialEq)]
 
-pub struct SnapBlob<'a> {
+pub struct SnapBuckets<'a> {
   pub _tab: flatbuffers::Table<'a>,
 }
 
-impl<'a> flatbuffers::Follow<'a> for SnapBlob<'a> {
-  type Inner = SnapBlob<'a>;
+impl<'a> flatbuffers::Follow<'a> for SnapBuckets<'a> {
+  type Inner = SnapBuckets<'a>;
   #[inline]
   unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
     Self { _tab: flatbuffers::Table::new(buf, loc) }
   }
 }
 
-impl<'a> SnapBlob<'a> {
-  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_SNAP_BUCKET_LEVEL: flatbuffers::VOffsetT = 6;
-  pub const VT_SNAP_BUCKETS: flatbuffers::VOffsetT = 8;
+impl<'a> SnapBuckets<'a> {
+  pub const VT_SNAP_BUCKETS: flatbuffers::VOffsetT = 4;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
-    SnapBlob { _tab: table }
+    SnapBuckets { _tab: table }
   }
   #[allow(unused_mut)]
   pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
     _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args SnapBlobArgs<'args>
-  ) -> flatbuffers::WIPOffset<SnapBlob<'bldr>> {
-    let mut builder = SnapBlobBuilder::new(_fbb);
-    builder.add_cell_id(args.cell_id);
+    args: &'args SnapBucketsArgs<'args>
+  ) -> flatbuffers::WIPOffset<SnapBuckets<'bldr>> {
+    let mut builder = SnapBucketsBuilder::new(_fbb);
     if let Some(x) = args.snap_buckets { builder.add_snap_buckets(x); }
-    builder.add_snap_bucket_level(args.snap_bucket_level);
     builder.finish()
   }
 
 
   #[inline]
-  pub fn cell_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(SnapBlob::VT_CELL_ID, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn snap_bucket_level(&self) -> u8 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u8>(SnapBlob::VT_SNAP_BUCKET_LEVEL, Some(0)).unwrap()}
-  }
-  #[inline]
   pub fn snap_buckets(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SnapBucket<'a>>>> {
     // Safety:
     // Created from valid Table for this object
     // which contains a valid value in this slot
-    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SnapBucket>>>>(SnapBlob::VT_SNAP_BUCKETS, None)}
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SnapBucket>>>>(SnapBuckets::VT_SNAP_BUCKETS, None)}
   }
 }
 
-impl flatbuffers::Verifiable for SnapBlob<'_> {
+impl flatbuffers::Verifiable for SnapBuckets<'_> {
   #[inline]
   fn run_verifier(
     v: &mut flatbuffers::Verifier, pos: usize
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
-     .visit_field::<u8>("snap_bucket_level", Self::VT_SNAP_BUCKET_LEVEL, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<SnapBucket>>>>("snap_buckets", Self::VT_SNAP_BUCKETS, false)?
      .finish();
     Ok(())
   }
 }
-pub struct SnapBlobArgs<'a> {
-    pub cell_id: u64,
-    pub snap_bucket_level: u8,
+pub struct SnapBucketsArgs<'a> {
     pub snap_buckets: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<SnapBucket<'a>>>>>,
 }
-impl<'a> Default for SnapBlobArgs<'a> {
+impl<'a> Default for SnapBucketsArgs<'a> {
   #[inline]
   fn default() -> Self {
-    SnapBlobArgs {
-      cell_id: 0,
-      snap_bucket_level: 0,
+    SnapBucketsArgs {
       snap_buckets: None,
     }
   }
 }
 
-pub struct SnapBlobBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+pub struct SnapBucketsBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
   fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
-impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SnapBlobBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_cell_id(&mut self, cell_id: u64) {
-    self.fbb_.push_slot::<u64>(SnapBlob::VT_CELL_ID, cell_id, 0);
-  }
-  #[inline]
-  pub fn add_snap_bucket_level(&mut self, snap_bucket_level: u8) {
-    self.fbb_.push_slot::<u8>(SnapBlob::VT_SNAP_BUCKET_LEVEL, snap_bucket_level, 0);
-  }
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> SnapBucketsBuilder<'a, 'b, A> {
   #[inline]
   pub fn add_snap_buckets(&mut self, snap_buckets: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<SnapBucket<'b >>>>) {
-    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SnapBlob::VT_SNAP_BUCKETS, snap_buckets);
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(SnapBuckets::VT_SNAP_BUCKETS, snap_buckets);
   }
   #[inline]
-  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SnapBlobBuilder<'a, 'b, A> {
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> SnapBucketsBuilder<'a, 'b, A> {
     let start = _fbb.start_table();
-    SnapBlobBuilder {
+    SnapBucketsBuilder {
       fbb_: _fbb,
       start_: start,
     }
   }
   #[inline]
-  pub fn finish(self) -> flatbuffers::WIPOffset<SnapBlob<'a>> {
+  pub fn finish(self) -> flatbuffers::WIPOffset<SnapBuckets<'a>> {
     let o = self.fbb_.end_table(self.start_);
     flatbuffers::WIPOffset::new(o.value())
   }
 }
 
-impl core::fmt::Debug for SnapBlob<'_> {
+impl core::fmt::Debug for SnapBuckets<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-    let mut ds = f.debug_struct("SnapBlob");
-      ds.field("cell_id", &self.cell_id());
-      ds.field("snap_bucket_level", &self.snap_bucket_level());
+    let mut ds = f.debug_struct("SnapBuckets");
       ds.field("snap_buckets", &self.snap_buckets());
       ds.finish()
   }
