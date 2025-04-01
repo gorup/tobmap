@@ -80,7 +80,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     info!("Reading OSM data...");
     
     // Use get_objs_and_deps to get all highways and their nodes in a single pass
-    let road_tags = &["highway", "road", "street", "primary", "secondary", "tertiary", "residential", "service", "trunk"];
+    let road_tags = &["highway"];
 
     info!("Loading highways and nodes...");
     let objects = reader.get_objs_and_deps(|obj| {
@@ -126,11 +126,17 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
                 .insert(*way_id);
         }
     }
+
+    let mut only_two_ways = 0;
     
     // Nodes with 1+ ways are intersections or endpoints
     let intersections: HashMap<i64, Intersection> = node_way_counts.iter()
         .filter(|(_, way_ids)| way_ids.len() >= 1)
         .filter_map(|(node_id, way_ids)| {
+            if way_ids.len() == 2 {
+                only_two_ways += 1;
+            }
+
             if let Some(node) = nodes.get(node_id) {
                 let lat_lng = LatLng::from_degrees(node.lat(), node.lon());
                 let cell_id = CellID::from(lat_lng).0;
@@ -146,7 +152,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         })
         .collect();
     
-    info!("Found {} intersections", intersections.len());
+    info!("Found {} intersections, {} with only 2 ways", intersections.len(), only_two_ways);
     
     // Build road segments with speed models
     let mut road_segments: Vec<RoadSegment> = Vec::new();
