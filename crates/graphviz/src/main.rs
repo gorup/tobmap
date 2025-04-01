@@ -140,24 +140,12 @@ fn visualize_graph(graph: &GraphBlob, args: &Args) -> StatusOr<RgbImage> {
     for (i, (lng, lat)) in node_positions.iter().enumerate() {
         let (x, y) = to_img_coords(*lng, *lat);
         
-        // Draw plus sign (draw multiple crosses of different sizes for thicker plus)
-        let size = args.node_size as i32;
+        // Draw a 5-pixel plus sign (center pixel + one pixel in each cardinal direction)
+        let x_i = x as i32;
+        let y_i = y as i32;
         
-        // Draw a cross
-        draw_cross_mut(&mut image, green, x as i32, y as i32);
-        
-        // If size > 1, draw additional crosses to make it thicker
-        if size > 1 {
-            for offset in 1..size {
-                // Draw horizontal extensions
-                draw_cross_mut(&mut image, green, x as i32 + offset, y as i32);
-                draw_cross_mut(&mut image, green, x as i32 - offset, y as i32);
-                
-                // Draw vertical extensions
-                draw_cross_mut(&mut image, green, x as i32, y as i32 + offset);
-                draw_cross_mut(&mut image, green, x as i32, y as i32 - offset);
-            }
-        }
+        // Center pixel
+        draw_cross_mut(&mut image, green, x_i, y_i);
         
         // Add labels if requested - omitted for now as drawing text requires more complex handling
         if args.show_labels {
