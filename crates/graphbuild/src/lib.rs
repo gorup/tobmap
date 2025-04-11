@@ -10,7 +10,7 @@ use s2::latlng::LatLng;
 use schema::tobmapgraph::{Edge, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction, 
     LocationBlob, LocationBlobArgs, EdgeLocationItems, EdgeLocationItemsArgs, NodeLocationItems, NodeLocationItemsArgs};
 use thiserror::Error;
-use log::info;
+use log::{info, warn};
 use rayon::prelude::*;
 
 
@@ -169,6 +169,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     
     // Build road segments with speed models
     let mut road_segments: Vec<RoadSegment> = Vec::new();
+    let mut oneway_count = 0;
     for (way_id, way) in &ways {
         // Parse speed model from tags
         let mut speed_model = SpeedModel::default();
@@ -177,6 +178,10 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         let is_oneway = way.tags.get("oneway")
             .map(|v| v == "yes")
             .unwrap_or(false);
+        
+        if is_oneway {
+            oneway_count += 1;
+        }
         
         // Default speeds based on road type
         if let Some(highway) = way.tags.get("highway") {
@@ -282,6 +287,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         });
     }
     
+    info!("Built {} road segments, including {} one-way segments", road_segments.len(), oneway_count);
     info!("Built {} road segments, will sort intersections by cell (took {:?})", road_segments.len(), last_time.elapsed());
     last_time = Instant::now();
 
@@ -307,7 +313,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     let mut edge_node_pairs = Vec::new();
     
     // Create a map to deduplicate edges
-    let mut edge_map: HashMap<(u32, u32), (u64, Vec<f32>, bool, RoadInteraction, RoadInteraction)> = HashMap::new();
+    let mut edge_map: HashMap<(u32, u32), (u64, Vec<f32>, bool, bool, RoadInteraction, RoadInteraction)> = HashMap::new();
     
     for segment in &road_segments {
         // Find intersection nodes along this segment
@@ -373,25 +379,38 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
                         (*end_idx, *start_idx)
                     };
                     
-                    // Check if this edge already exists, otherwise add it
-                    edge_map.entry(edge_key).or_insert_with(|| (
+                    // Store the actual direction of this segment for proper merging of one-way segments
+                    let is_forward = start_idx < end_idx;
+                    let allows_forward = if is_forward { true } else { !segment.is_oneway };
+                    let allows_backward = if is_forward { !segment.is_oneway } else { true };
+                    
+                    // Get entry or insert default
+                    let entry = edge_map.entry(edge_key).or_insert_with(|| (
                         cell_id, 
                         travel_costs.clone(), 
-                        !segment.is_oneway,
+                        false, // allows_forward
+                        false, // allows_backward
                         start_interaction, 
                         end_interaction
-                    )).1 = travel_costs.iter().zip(edge_map.get(&edge_key).map(|v| &v.1).unwrap_or(&vec![-1.0; 4]))
-                        .map(|(&c1, &c2)| merge_travel_costs(c1, c2))
-                        .collect();
+                    ));
+                    
+                    // Update directional flags
+                    entry.2 |= allows_forward;
+                    entry.3 |= allows_backward;
                 }
             }
         }
     }
     
+    // Log the count of one-way segments
+    let total_edge_count = edge_map.len();
+    let one_way_count = edge_map.values().filter(|(_, _, allows_fwd, allows_bwd, _, _)| !(*allows_fwd && *allows_bwd)).count();
+    info!("Found {} one-way road segments out of {} total segments", one_way_count, total_edge_count);
+    
     // Convert edge map to edge_node_pairs
-    for ((start_idx, end_idx), (cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction)) in edge_map {
+    for ((start_idx, end_idx), (cell_id, travel_costs, allows_fwd, allows_bwd, start_interaction, end_interaction)) in edge_map {
         edge_node_pairs.push((start_idx, end_idx, cell_id, 
-                             travel_costs, backwards_allowed,
+                             travel_costs, allows_fwd && allows_bwd,
                              start_interaction, end_interaction));
     }
 
@@ -423,8 +442,8 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
             15 // Not allowed or extremely slow
         };
         
-        // Set the costs_and_flags: bits 0-3 for cost, bit 7 for backwards_allowed
-        let costs_and_flags = drive_cost | (if *backwards_allowed { 0x80 } else { 0 });
+        // Set the costs_and_flags: bits 0,1,2,3 for cost, bit 7 for backwards_allowed
+        let costs_and_flags = drive_cost << 4 | (if *backwards_allowed { 0b0000_0001} else { 0 });
         
         // Create edge directly as a struct 
         let edge = Edge::new(

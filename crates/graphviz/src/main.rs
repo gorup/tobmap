@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::Parser;
 use image::{Rgb, RgbImage};
-use imageproc::drawing::{draw_line_segment_mut, draw_cross_mut};
+use imageproc::drawing::{draw_line_segment_mut, draw_cross_mut, draw_filled_circle_mut};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
 use schema::tobmapgraph::{GraphBlob, LocationBlob};
@@ -45,7 +45,7 @@ struct Args {
     max_size: u32,
     
     /// Node size in the visualization
-    #[arg(long, default_value_t = 2)]
+    #[arg(long, default_value_t = 0)]
     node_size: u32,
     
     /// Edge width in the visualization
@@ -61,6 +61,56 @@ struct Args {
 fn cell_id_to_latlng(cell_id: u64) -> LatLng {
     let cell = CellID(cell_id);
     LatLng::from(cell)
+}
+
+/// Draw an arrow head at a specified point with a given direction
+fn draw_arrow_head(image: &mut RgbImage, from: (f32, f32), to: (f32, f32), color: Rgb<u8>, size: f32) {
+    let dx = to.0 - from.0;
+    let dy = to.1 - from.1;
+    let length = (dx * dx + dy * dy).sqrt();
+    
+    if length < 0.001 {
+        return;
+    }
+    
+    // Normalize direction vector
+    let direction_x = dx / length;
+    let direction_y = dy / length;
+    
+    // Calculate perpendicular vector
+    let perpendicular_x = -direction_y;
+    let perpendicular_y = direction_x;
+    
+    // Arrow head points
+    let arrow_x = to.0 - direction_x * size;
+    let arrow_y = to.1 - direction_y * size;
+    
+    let point1 = (
+        arrow_x + perpendicular_x * size/2.0,
+        arrow_y + perpendicular_y * size/2.0
+    );
+    
+    let point2 = (
+        arrow_x - perpendicular_x * size/2.0,
+        arrow_y - perpendicular_y * size/2.0
+    );
+    
+    // Draw arrow head
+    draw_line_segment_mut(image, to, point1, color);
+    draw_line_segment_mut(image, to, point2, color);
+}
+
+/// Calculate color from cost (0-15)
+/// 0 = green, 15 = red, values in between are on a gradient
+fn get_cost_color(cost: u8) -> Rgb<u8> {
+    // Ensure cost is in range 0-15
+    let cost = cost.min(15);
+    
+    // Calculate red and green components - flipped from previous implementation
+    let red = (cost as u32 * 255 / 15) as u8;
+    let green = 255 - (cost as u32 * 255 / 15) as u8;
+    
+    Rgb([red, green, 0])
 }
 
 /// Main function to create PNG visualization from graph data
@@ -120,8 +170,7 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     // Create an empty white image
     let mut image = RgbImage::new(img_width, img_height);
     let white = Rgb([255, 255, 255]);
-    let black = Rgb([0, 0, 0]);
-    let green = Rgb([0, 153, 51]);
+    let gray = Rgb([128, 128, 128]);
     
     // Fill with white
     for pixel in image.pixels_mut() {
@@ -136,6 +185,9 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         (x as f32, y as f32)
     };
     
+    // Arrow size for direction indicators (relative to edge width)
+    let arrow_size = 6.0 * args.edge_width;
+    
     // Add edges to image
     for i in 0..edges.len() {
         let edge = edges.get(i);
@@ -149,17 +201,35 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         
         let (x1, y1) = to_img_coords(node_positions[node1_idx].0, node_positions[node1_idx].1);
         let (x2, y2) = to_img_coords(node_positions[node2_idx].0, node_positions[node2_idx].1);
-        
+
+        // Check if backwards direction is allowed (last bit of costs_and_flags)
+        let costs_and_flags = edge.costs_and_flags();
+        let backwards_allowed = (costs_and_flags & 0b0000_0001) != 0;
+        let cost: u8 = (costs_and_flags >> 4) as u8;
+
+        // Get color based on cost (0-15)
+        let edge_color = get_cost_color(cost);
+
         // Draw the edge with configurable width
-        draw_line_segment_mut(&mut image, (x1, y1), (x2, y2), black);
+        draw_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color);
+        
+        // Draw direction arrow only for one-way edges
+        if !backwards_allowed {
+            // Calculate midpoint for arrow placement
+            let mid_x = (x1 + x2) / 2.0;
+            let mid_y = (y1 + y2) / 2.0;
+            
+            // One-way edge - draw arrow at midpoint
+            draw_arrow_head(&mut image, (x1, y1), (mid_x, mid_y), edge_color, arrow_size);
+        }
     }
     
-    // Add nodes to image as crosses
+    // Add nodes to image as circles
     for (i, (lng, lat)) in node_positions.iter().enumerate() {
         let (x, y) = to_img_coords(*lng, *lat);
         
-        // Draw a cross with the specified size
-        draw_cross_mut(&mut image, green, x as i32, y as i32);
+        // Draw a circle with the specified size
+        draw_filled_circle_mut(&mut image, (x as i32, y as i32), args.node_size as i32, gray);
         
         // If requested, draw node indices as labels
         if args.show_labels {
