@@ -13,8 +13,6 @@ struct Interactions {
 
 // A node represents a real-world intersection
 table Node {
-  cell_id:uint64;
-
   // related edges, with their interactions for 
   // incoming, outgoing pairs
   edges:[uint32];
@@ -23,18 +21,14 @@ table Node {
 
 // An edge represents a way (street, path, etc.) between two nodes
 struct Edge {
-  cell_id:uint64;
-
   point_1_node_idx:uint32;
   point_2_node_idx:uint32;
 
-  // Can you go from vertex_2 to vertex_1?
-  backwards_allowed:bool;
-
-  // Seconds!
-  car_travel_cost:uint16;
-  bike_travel_cost:uint16;
-  walk_travel_cost:uint16;
+  // from left, bits
+  // - 0,1,2,3 are drive cost (0-16)
+  // - 4,5,6 are reserved
+  // - 7 is 'backwards_allowed'
+  costs_and_flags:uint8;
 }
 
 table GraphBlob {

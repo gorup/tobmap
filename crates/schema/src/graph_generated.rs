@@ -239,25 +239,21 @@ impl<'a> Interactions {
 
 }
 
-// struct Edge, aligned to 8
+// struct Edge, aligned to 4
 #[repr(transparent)]
 #[derive(Clone, Copy, PartialEq)]
-pub struct Edge(pub [u8; 24]);
+pub struct Edge(pub [u8; 12]);
 impl Default for Edge { 
   fn default() -> Self { 
-    Self([0; 24])
+    Self([0; 12])
   }
 }
 impl core::fmt::Debug for Edge {
   fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
     f.debug_struct("Edge")
-      .field("cell_id", &self.cell_id())
       .field("point_1_node_idx", &self.point_1_node_idx())
       .field("point_2_node_idx", &self.point_2_node_idx())
-      .field("backwards_allowed", &self.backwards_allowed())
-      .field("car_travel_cost", &self.car_travel_cost())
-      .field("bike_travel_cost", &self.bike_travel_cost())
-      .field("walk_travel_cost", &self.walk_travel_cost())
+      .field("costs_and_flags", &self.costs_and_flags())
       .finish()
   }
 }
@@ -286,7 +282,7 @@ impl<'b> flatbuffers::Push for Edge {
     }
     #[inline]
     fn alignment() -> flatbuffers::PushAlignment {
-        flatbuffers::PushAlignment::new(8)
+        flatbuffers::PushAlignment::new(4)
     }
 }
 
@@ -303,52 +299,15 @@ impl<'a> flatbuffers::Verifiable for Edge {
 impl<'a> Edge {
   #[allow(clippy::too_many_arguments)]
   pub fn new(
-    cell_id: u64,
     point_1_node_idx: u32,
     point_2_node_idx: u32,
-    backwards_allowed: bool,
-    car_travel_cost: u16,
-    bike_travel_cost: u16,
-    walk_travel_cost: u16,
+    costs_and_flags: u8,
   ) -> Self {
-    let mut s = Self([0; 24]);
-    s.set_cell_id(cell_id);
+    let mut s = Self([0; 12]);
     s.set_point_1_node_idx(point_1_node_idx);
     s.set_point_2_node_idx(point_2_node_idx);
-    s.set_backwards_allowed(backwards_allowed);
-    s.set_car_travel_cost(car_travel_cost);
-    s.set_bike_travel_cost(bike_travel_cost);
-    s.set_walk_travel_cost(walk_travel_cost);
+    s.set_costs_and_flags(costs_and_flags);
     s
-  }
-
-  pub fn cell_id(&self) -> u64 {
-    let mut mem = core::mem::MaybeUninit::<<u64 as EndianScalar>::Scalar>::uninit();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    EndianScalar::from_little_endian(unsafe {
-      core::ptr::copy_nonoverlapping(
-        self.0[0..].as_ptr(),
-        mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<u64 as EndianScalar>::Scalar>(),
-      );
-      mem.assume_init()
-    })
-  }
-
-  pub fn set_cell_id(&mut self, x: u64) {
-    let x_le = x.to_little_endian();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    unsafe {
-      core::ptr::copy_nonoverlapping(
-        &x_le as *const _ as *const u8,
-        self.0[0..].as_mut_ptr(),
-        core::mem::size_of::<<u64 as EndianScalar>::Scalar>(),
-      );
-    }
   }
 
   pub fn point_1_node_idx(&self) -> u32 {
@@ -358,7 +317,7 @@ impl<'a> Edge {
     // Which contains a valid value in this slot
     EndianScalar::from_little_endian(unsafe {
       core::ptr::copy_nonoverlapping(
-        self.0[8..].as_ptr(),
+        self.0[0..].as_ptr(),
         mem.as_mut_ptr() as *mut u8,
         core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
       );
@@ -374,7 +333,7 @@ impl<'a> Edge {
     unsafe {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
-        self.0[8..].as_mut_ptr(),
+        self.0[0..].as_mut_ptr(),
         core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
       );
     }
@@ -387,7 +346,7 @@ impl<'a> Edge {
     // Which contains a valid value in this slot
     EndianScalar::from_little_endian(unsafe {
       core::ptr::copy_nonoverlapping(
-        self.0[12..].as_ptr(),
+        self.0[4..].as_ptr(),
         mem.as_mut_ptr() as *mut u8,
         core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
       );
@@ -403,28 +362,28 @@ impl<'a> Edge {
     unsafe {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
-        self.0[12..].as_mut_ptr(),
+        self.0[4..].as_mut_ptr(),
         core::mem::size_of::<<u32 as EndianScalar>::Scalar>(),
       );
     }
   }
 
-  pub fn backwards_allowed(&self) -> bool {
-    let mut mem = core::mem::MaybeUninit::<<bool as EndianScalar>::Scalar>::uninit();
+  pub fn costs_and_flags(&self) -> u8 {
+    let mut mem = core::mem::MaybeUninit::<<u8 as EndianScalar>::Scalar>::uninit();
     // Safety:
     // Created from a valid Table for this object
     // Which contains a valid value in this slot
     EndianScalar::from_little_endian(unsafe {
       core::ptr::copy_nonoverlapping(
-        self.0[16..].as_ptr(),
+        self.0[8..].as_ptr(),
         mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
+        core::mem::size_of::<<u8 as EndianScalar>::Scalar>(),
       );
       mem.assume_init()
     })
   }
 
-  pub fn set_backwards_allowed(&mut self, x: bool) {
+  pub fn set_costs_and_flags(&mut self, x: u8) {
     let x_le = x.to_little_endian();
     // Safety:
     // Created from a valid Table for this object
@@ -432,95 +391,8 @@ impl<'a> Edge {
     unsafe {
       core::ptr::copy_nonoverlapping(
         &x_le as *const _ as *const u8,
-        self.0[16..].as_mut_ptr(),
-        core::mem::size_of::<<bool as EndianScalar>::Scalar>(),
-      );
-    }
-  }
-
-  pub fn car_travel_cost(&self) -> u16 {
-    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    EndianScalar::from_little_endian(unsafe {
-      core::ptr::copy_nonoverlapping(
-        self.0[18..].as_ptr(),
-        mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-      mem.assume_init()
-    })
-  }
-
-  pub fn set_car_travel_cost(&mut self, x: u16) {
-    let x_le = x.to_little_endian();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    unsafe {
-      core::ptr::copy_nonoverlapping(
-        &x_le as *const _ as *const u8,
-        self.0[18..].as_mut_ptr(),
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-    }
-  }
-
-  pub fn bike_travel_cost(&self) -> u16 {
-    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    EndianScalar::from_little_endian(unsafe {
-      core::ptr::copy_nonoverlapping(
-        self.0[20..].as_ptr(),
-        mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-      mem.assume_init()
-    })
-  }
-
-  pub fn set_bike_travel_cost(&mut self, x: u16) {
-    let x_le = x.to_little_endian();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    unsafe {
-      core::ptr::copy_nonoverlapping(
-        &x_le as *const _ as *const u8,
-        self.0[20..].as_mut_ptr(),
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-    }
-  }
-
-  pub fn walk_travel_cost(&self) -> u16 {
-    let mut mem = core::mem::MaybeUninit::<<u16 as EndianScalar>::Scalar>::uninit();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    EndianScalar::from_little_endian(unsafe {
-      core::ptr::copy_nonoverlapping(
-        self.0[22..].as_ptr(),
-        mem.as_mut_ptr() as *mut u8,
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
-      );
-      mem.assume_init()
-    })
-  }
-
-  pub fn set_walk_travel_cost(&mut self, x: u16) {
-    let x_le = x.to_little_endian();
-    // Safety:
-    // Created from a valid Table for this object
-    // Which contains a valid value in this slot
-    unsafe {
-      core::ptr::copy_nonoverlapping(
-        &x_le as *const _ as *const u8,
-        self.0[22..].as_mut_ptr(),
-        core::mem::size_of::<<u16 as EndianScalar>::Scalar>(),
+        self.0[8..].as_mut_ptr(),
+        core::mem::size_of::<<u8 as EndianScalar>::Scalar>(),
       );
     }
   }
@@ -543,9 +415,8 @@ impl<'a> flatbuffers::Follow<'a> for Node<'a> {
 }
 
 impl<'a> Node<'a> {
-  pub const VT_CELL_ID: flatbuffers::VOffsetT = 4;
-  pub const VT_EDGES: flatbuffers::VOffsetT = 6;
-  pub const VT_INTERACTIONS: flatbuffers::VOffsetT = 8;
+  pub const VT_EDGES: flatbuffers::VOffsetT = 4;
+  pub const VT_INTERACTIONS: flatbuffers::VOffsetT = 6;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -557,20 +428,12 @@ impl<'a> Node<'a> {
     args: &'args NodeArgs<'args>
   ) -> flatbuffers::WIPOffset<Node<'bldr>> {
     let mut builder = NodeBuilder::new(_fbb);
-    builder.add_cell_id(args.cell_id);
     if let Some(x) = args.interactions { builder.add_interactions(x); }
     if let Some(x) = args.edges { builder.add_edges(x); }
     builder.finish()
   }
 
 
-  #[inline]
-  pub fn cell_id(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(Node::VT_CELL_ID, Some(0)).unwrap()}
-  }
   #[inline]
   pub fn edges(&self) -> Option<flatbuffers::Vector<'a, u32>> {
     // Safety:
@@ -594,7 +457,6 @@ impl flatbuffers::Verifiable for Node<'_> {
   ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
     use self::flatbuffers::Verifiable;
     v.visit_table(pos)?
-     .visit_field::<u64>("cell_id", Self::VT_CELL_ID, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u32>>>("edges", Self::VT_EDGES, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, Interactions>>>("interactions", Self::VT_INTERACTIONS, false)?
      .finish();
@@ -602,7 +464,6 @@ impl flatbuffers::Verifiable for Node<'_> {
   }
 }
 pub struct NodeArgs<'a> {
-    pub cell_id: u64,
     pub edges: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u32>>>,
     pub interactions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, Interactions>>>,
 }
@@ -610,7 +471,6 @@ impl<'a> Default for NodeArgs<'a> {
   #[inline]
   fn default() -> Self {
     NodeArgs {
-      cell_id: 0,
       edges: None,
       interactions: None,
     }
@@ -622,10 +482,6 @@ pub struct NodeBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
   start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
 }
 impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NodeBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_cell_id(&mut self, cell_id: u64) {
-    self.fbb_.push_slot::<u64>(Node::VT_CELL_ID, cell_id, 0);
-  }
   #[inline]
   pub fn add_edges(&mut self, edges: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u32>>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(Node::VT_EDGES, edges);
@@ -652,7 +508,6 @@ impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> NodeBuilder<'a, 'b, A> {
 impl core::fmt::Debug for Node<'_> {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     let mut ds = f.debug_struct("Node");
-      ds.field("cell_id", &self.cell_id());
       ds.field("edges", &self.edges());
       ds.field("interactions", &self.interactions());
       ds.finish()
