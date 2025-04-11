@@ -38,3 +38,30 @@ table GraphBlob {
     edges:[Edge];
     nodes:[Node];
 }
+
+table EdgeLocationItems {
+  points:[uint64]; // All of the points on the edge as S2CellIds
+}
+
+table NodeLocationItems {
+  cell_id:uint64; // The cell id of the node
+
+  // Future: repeated street names, 
+}
+
+table LocationBlob {
+  // Parallel w/ GraphBlob edges
+  edge_location_items:[EdgeLocationItems];
+  // Parallel w/ GraphBlob nodes
+  node_location_items:[NodeLocationItems];
+}
+
+table DescriptionBlob {
+  // Parallel w/ GraphBlob edges
+  edge_descriptions:[EdgeDescriptionThings];
+}
+
+// 
+table EdgeDescriptionThings {
+  street_names:[string];
+}

@@ -410,14 +410,14 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
         // We use the car speed as the primary determinant of the cost
         let drive_cost = if travel_costs[0] > 0.0 {
             // Calculate speed in MPH
-            let distance_meters = intersections_vec[*start_idx as usize].1.location
-                .distance(&intersections_vec[*end_idx as usize].1.location).rad() * 6371000.0;
-            let time_seconds = travel_costs[0];
-            let speed_mps = distance_meters / time_seconds;
-            let speed_mph = speed_mps * 2.23694; // Convert m/s to mph
-            
+            let distance_meters: f32 = (intersections_vec[*start_idx as usize].1.location
+                .distance(&intersections_vec[*end_idx as usize].1.location).rad() * 6371000.0) as f32;
+            let time_seconds: f32 = travel_costs[0];
+            let speed_mps: f32 = distance_meters / time_seconds;
+            let speed_mph: f32 = speed_mps * 2.23694 as f32; // Convert m/s to mph
+
             // Convert speed to cost (0-15)
-            speed_to_cost_value(speed_mph as f32)
+            speed_to_cost_value(speed_mph)
         } else {
             15 // Not allowed or extremely slow
         };
