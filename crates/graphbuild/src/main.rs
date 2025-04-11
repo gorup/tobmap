@@ -1,73 +1,39 @@
-use graphbuild::osm_to_graph_blob;
+use graphbuild::{osm_to_graph_blob, get_graph_blob, get_location_blob};
 use std::env;
-use std::path::{Path, PathBuf};
-use std::fs::File;
-use std::io::{Write, Read};
+use std::path::PathBuf;
+use std::fs;
+use log::info;
 
-fn main() {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-
-    let args: Vec<String> = env::args().collect();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
+    let mut args = std::env::args().skip(1);
+    
     if args.len() < 2 {
-        eprintln!("Usage: {} <osm-pbf-file> [output-file]", args[0]);
+        eprintln!("Usage: graphbuild <input_osm_file> <output_graph_file> [output_location_file]");
         std::process::exit(1);
     }
     
-    let osm_path = &args[1];
-    let output_path = if args.len() > 2 {
-        PathBuf::from(&args[2])
-    } else {
-        // Create default output filename by replacing the extension with .graph
-        let input_path = PathBuf::from(osm_path);
-        let stem = input_path.file_stem().unwrap_or_default();
-        let mut output = PathBuf::from(input_path.parent().unwrap_or_else(|| Path::new(".")));
-        output.push(stem);
-        output.set_extension("graph");
-        output
-    };
+    let input_file = args.next().unwrap();
+    let output_graph_file = args.next().unwrap();
+    let output_location_file = args.next().unwrap_or_else(|| {
+        // If no location file is specified, derive it from the graph file
+        let mut location_path = PathBuf::from(&output_graph_file);
+        location_path.set_extension("location.fb");
+        location_path.to_string_lossy().to_string()
+    });
     
-    println!("Processing OSM file: {}", osm_path);
+    info!("Reading OSM data from {}", input_file);
+    let osm_data = fs::read(&input_file)?;
     
-    // Read the OSM file into a byte vector
-    let mut osm_data = Vec::new();
-    match File::open(osm_path) {
-        Ok(mut file) => {
-            if let Err(e) = file.read_to_end(&mut osm_data) {
-                eprintln!("Error reading OSM file: {}", e);
-                std::process::exit(1);
-            }
-        },
-        Err(e) => {
-            eprintln!("Error opening OSM file: {}", e);
-            std::process::exit(1);
-        }
-    }
+    info!("Building graph...");
+    let (graph_data, location_data) = osm_to_graph_blob(&osm_data)?;
     
-    match osm_to_graph_blob(&osm_data) {
-        Ok(graph_blob) => {
-            println!("Successfully generated graph blob with {} bytes", graph_blob.len());
-            
-            // Write to output file
-            match File::create(&output_path) {
-                Ok(mut file) => {
-                    match file.write_all(&graph_blob) {
-                        Ok(_) => println!("Graph blob written to {}", output_path.display()),
-                        Err(e) => {
-                            eprintln!("Error writing to file: {}", e);
-                            std::process::exit(1);
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Error creating output file: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        },
-        Err(e) => {
-            eprintln!("Error processing OSM file: {}", e);
-            std::process::exit(1);
-        }
-    }
+    info!("Writing graph blob to {}", output_graph_file);
+    fs::write(&output_graph_file, graph_data)?;
+    
+    info!("Writing location blob to {}", output_location_file);
+    fs::write(&output_location_file, location_data)?;
+    
+    Ok(())
 }
 

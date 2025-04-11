@@ -7,7 +7,8 @@ use flatbuffers::FlatBufferBuilder;
 use osmpbfreader::{Node, OsmId, OsmObj, OsmPbfReader, Way};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
-use schema::tobmapgraph::{Edge, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction};
+use schema::tobmapgraph::{Edge, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction, 
+    LocationBlob, LocationBlobArgs, EdgeLocationItems, EdgeLocationItemsArgs, NodeLocationItems, NodeLocationItemsArgs};
 use thiserror::Error;
 use log::info;
 use rayon::prelude::*;
@@ -61,17 +62,17 @@ struct RoadSegment {
     interactions: HashMap<i64, RoadInteraction>,
 }
 
-/// Parses OSM PBF data and returns a GraphBlob
+/// Parses OSM PBF data and returns a GraphBlob and LocationBlob
 /// 
 /// The function processes the OpenStreetMap data to create a graph representation
-/// with nodes (intersections) and edges (road segments).
+/// with nodes (intersections) and edges (road segments), along with their locations.
 ///
 /// # Arguments
 /// * `osm_data` - Slice of bytes containing OSM PBF data
 ///
 /// # Returns
-/// * `StatusOr<Vec<u8>>` - Result containing the serialized graph data or an error
-pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
+/// * `StatusOr<(Vec<u8>, Vec<u8>)>` - Result containing the serialized graph and location data or an error
+pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     let mut reader = OsmPbfReader::new(std::io::Cursor::new(osm_data));
 
     let mut last_time = Instant::now();
@@ -477,10 +478,12 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     info!("Sorting done, now create flatbuffer things, took {:?}", last_time.elapsed());
     last_time = Instant::now();
 
+    let nodes_with_edges_len = nodes_with_edges.len();
+
     // Create FlatBuffer nodes
-    let mut graph_nodes = Vec::with_capacity(nodes_with_edges.len());
+    let mut graph_nodes = Vec::with_capacity(nodes_with_edges_len);
     
-    for (_, _cell_id, edge_indices, interactions) in nodes_with_edges {
+    for (_, _cell_id, edge_indices, interactions) in &nodes_with_edges {
         let edge_indices_u32: Vec<u32> = edge_indices.iter().map(|&i| i as u32).collect();
         let edge_indices_offset = builder.create_vector(&edge_indices_u32);
         
@@ -533,20 +536,90 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<Vec<u8>> {
     info!("Graph building complete!");
     
     // Return serialized data
-    let finished_data = builder.finished_data().to_vec();
+    let graph_data = builder.finished_data().to_vec();
     
-    Ok(finished_data)
+    info!("Graph blob built, now building location blob...");
+    
+    // Create LocationBlob
+    let mut location_builder = FlatBufferBuilder::new();
+    
+    // Store node cell IDs
+    let mut node_locations = Vec::with_capacity(nodes_with_edges_len);
+    for (_, cell_id, _, _) in &nodes_with_edges {
+        let node_location_args = NodeLocationItemsArgs {
+            cell_id: *cell_id
+        };
+        
+        let node_location = NodeLocationItems::create(&mut location_builder, &node_location_args);
+        node_locations.push(node_location);
+    }
+    
+    // Create vector of node location items
+    let _vector_start = location_builder.start_vector::<flatbuffers::ForwardsUOffset<NodeLocationItems>>(node_locations.len());
+    for i in (0..node_locations.len()).rev() {
+        location_builder.push(node_locations[i]);
+    }
+    let node_location_items_offset = location_builder.end_vector(node_locations.len());
+    
+    // Store edge point locations
+    let mut edge_locations = Vec::with_capacity(edge_node_pairs.len());
+    for (_, _, cell_id, _, _, _, _) in &edge_node_pairs {
+        let points = vec![*cell_id];
+        let points_offset = location_builder.create_vector(&points);
+        
+        let edge_location_args = EdgeLocationItemsArgs {
+            points: Some(points_offset)
+        };
+        
+        let edge_location = EdgeLocationItems::create(&mut location_builder, &edge_location_args);
+        edge_locations.push(edge_location);
+    }
+    
+    // Create vector of edge location items
+    let _vector_start = location_builder.start_vector::<flatbuffers::ForwardsUOffset<EdgeLocationItems>>(edge_locations.len());
+    for i in (0..edge_locations.len()).rev() {
+        location_builder.push(edge_locations[i]);
+    }
+    let edge_location_items_offset = location_builder.end_vector(edge_locations.len());
+    
+    // Create location blob arguments
+    let location_blob_args = LocationBlobArgs {
+        edge_location_items: Some(edge_location_items_offset),
+        node_location_items: Some(node_location_items_offset)
+    };
+    
+    // Build final location blob
+    let location_blob = LocationBlob::create(&mut location_builder, &location_blob_args);
+    
+    location_builder.finish(location_blob, None);
+    
+    info!("Location blob building complete!");
+    
+    let location_data = location_builder.finished_data().to_vec();
+    
+    Ok((graph_data, location_data))
 }
 
 /// Converts the serialized buffer to a GraphBlob reference
 /// 
 /// # Arguments
-/// * `buffer` - Serialized flatbuffer data
+/// * `buffer` - Serialized flatbuffer data for graph
 ///
 /// # Returns
 /// * `GraphBlob` - Reference to the graph data in the buffer
 pub fn get_graph_blob(buffer: &[u8]) -> schema::tobmapgraph::GraphBlob {
     flatbuffers::root::<schema::tobmapgraph::GraphBlob>(buffer).unwrap()
+}
+
+/// Converts the serialized buffer to a LocationBlob reference
+/// 
+/// # Arguments
+/// * `buffer` - Serialized flatbuffer data for location
+///
+/// # Returns
+/// * `LocationBlob` - Reference to the location data in the buffer
+pub fn get_location_blob(buffer: &[u8]) -> schema::tobmapgraph::LocationBlob {
+    flatbuffers::root::<schema::tobmapgraph::LocationBlob>(buffer).unwrap()
 }
 
 /// Takes two travel costs and returns the better (smaller but valid) cost
@@ -598,7 +671,7 @@ mod tests {
         
         // Build the graph
         let graph_data = osm_to_graph_blob(&test_data).expect("Failed to build graph");
-        let graph = get_graph_blob(&graph_data);
+        let graph = get_graph_blob(&graph_data.0);
 
         // Verify basic graph properties
         assert_eq!(graph.nodes().unwrap().len(), 15, "Should have 15 nodes");

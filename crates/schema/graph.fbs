@@ -56,12 +56,12 @@ table LocationBlob {
   node_location_items:[NodeLocationItems];
 }
 
-table DescriptionBlob {
+//table DescriptionBlob {
   // Parallel w/ GraphBlob edges
-  edge_descriptions:[EdgeDescriptionThings];
-}
+//  edge_descriptions:[EdgeDescriptionThings];
+//}
 
 // 
-table EdgeDescriptionThings {
-  street_names:[string];
-}
+//table EdgeDescriptionThings {
+//  street_names:[string];
+//}
