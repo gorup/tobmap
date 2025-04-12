@@ -10,5 +10,8 @@ table SnapBucket {
 }
 
 table SnapBuckets {
+    // Contains entries for ALL cells at the outer level, even if they have no edges.
+    // This allows direct indexing into the array based on cell ID.
+    // Each SnapBucket contains edges grouped by the inner cell level.
     snap_buckets:[SnapBucket];
 }

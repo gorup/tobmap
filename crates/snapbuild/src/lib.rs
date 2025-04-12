@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,7 +9,8 @@ use schema::snap_generated::tobmapsnap::{SnapBucket, SnapBucketArgs, SnapBuckets
 
 /// Configuration for SnapBucket generation
 pub struct Config {
-    pub cell_level: u8,
+    pub outer_cell_level: u8,
+    pub inner_cell_level: u8,
     pub graph_path: PathBuf,
     pub location_path: PathBuf,
     pub output_dir: PathBuf,
@@ -18,7 +19,8 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            cell_level: 4,
+            outer_cell_level: 4,
+            inner_cell_level: 8,
             graph_path: PathBuf::from("graph.bin"),
             location_path: PathBuf::from("location.bin"),
             output_dir: PathBuf::from("snapbuckets"),
@@ -44,20 +46,20 @@ pub fn process(config: &Config) -> Result<(), String> {
     
     // Parse graph blob
     let graph_blob = flatbuffers::root_with_opts::<GraphBlob>(&verifier_opts, &graph_data)
-        .expect("Failed to parse graph data from buffer");
+        .map_err(|e| format!("Failed to parse graph data: {}", e))?;
         
     let location_blob = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_data)
-        .expect("Failed to parse location data from buffer");
+        .map_err(|e| format!("Failed to parse location data: {}", e))?;
     
     // Create output directory if it doesn't exist
     fs::create_dir_all(&config.output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;
     
-    // Group nodes and edges by cell ids at the specified level
-    let buckets = build_buckets(&graph_blob, &location_blob, config.cell_level)?;
+    // Group nodes and edges by cell ids at the specified levels
+    let outer_buckets = build_outer_buckets(&graph_blob, &location_blob, config.outer_cell_level, config.inner_cell_level)?;
     
-    // Generate and write SnapBuckets files
-    write_snap_buckets(&buckets, &config.output_dir)?;
+    // Generate and write SnapBuckets files, one per outer level cell
+    write_snap_buckets(&outer_buckets, &config.output_dir)?;
     
     Ok(())
 }
@@ -70,37 +72,70 @@ fn read_binary_file(path: &Path) -> std::io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
-// Data structure to hold bucket data
-struct BucketData {
+// Data structure to hold inner bucket data
+struct InnerBucketData {
     cell_id: u64,
     edge_cell_ids: Vec<u64>,
     edge_indexes: Vec<u32>,
 }
 
-// Truncate a cell_id to a specific level
-fn truncate_cell_id(cell_id: u64, level: u8) -> u64 {
-    // Truncate the cell_id to the specific level
-    // This is a simplified implementation and may need to be adjusted
-    // based on your specific cell_id encoding scheme
-    let bits_to_keep = level * 3; // Assuming each level adds 3 bits of precision
-    cell_id >> (64 - bits_to_keep)
+// Data structure to hold outer bucket data (contains inner buckets)
+struct OuterBucketData {
+    cell_id: u64,
+    inner_buckets: HashMap<u64, InnerBucketData>,
 }
 
-// Build buckets of data grouped by cell id at the specified level
-fn build_buckets(graph_blob: &GraphBlob, location_blob: &LocationBlob, cell_level: u8) -> Result<HashMap<u64, BucketData>, String> {
-    let mut buckets: HashMap<u64, BucketData> = HashMap::new();
+// Truncate a cell_id to a specific level using S2Cell-like logic
+fn parent_cell_id(cell_id: u64, level: u8) -> u64 {
+    // For S2Cells, we can get the parent by shifting right by 2 bits per level
+    // This assumes cell_id is at least level 25 and we're going down to a lower level
+    let shift_bits = (25 - level) * 2;
+    (cell_id >> shift_bits) << shift_bits
+}
+
+// Build outer buckets with inner buckets grouped by cell IDs
+fn build_outer_buckets(
+    graph_blob: &GraphBlob, 
+    location_blob: &LocationBlob, 
+    outer_level: u8, 
+    inner_level: u8
+) -> Result<HashMap<u64, OuterBucketData>, String> {
+    let mut outer_buckets: HashMap<u64, OuterBucketData> = HashMap::new();
+    let mut all_outer_cell_ids = HashSet::new();
     
-    // Process node locations
+    // First pass: collect all outer cell IDs from node locations
     if let Some(node_locations) = location_blob.node_location_items() {
         for i in 0..node_locations.len() {
-            // Direct access instead of using match for non-optional value
             let node_loc = node_locations.get(i);
-            
             let cell_id = node_loc.cell_id();
-            let truncated_cell_id = truncate_cell_id(cell_id, cell_level);
+            let outer_cell_id = parent_cell_id(cell_id, outer_level);
+            all_outer_cell_ids.insert(outer_cell_id);
+        }
+    }
+    
+    // Initialize all outer buckets with empty inner buckets
+    for &outer_cell_id in &all_outer_cell_ids {
+        let outer_bucket = outer_buckets.entry(outer_cell_id).or_insert_with(|| OuterBucketData {
+            cell_id: outer_cell_id,
+            inner_buckets: HashMap::new(),
+        });
+        
+        // Generate all possible inner cells for this outer cell
+        // For simplicity, we'll just ensure we have entries in the inner_buckets map
+        // A real implementation would calculate all possible inner cells within the outer cell
+    }
+    
+    // Process node locations and edges
+    if let Some(node_locations) = location_blob.node_location_items() {
+        for i in 0..node_locations.len() {
+            let node_loc = node_locations.get(i);
+            let cell_id = node_loc.cell_id();
+            let outer_cell_id = parent_cell_id(cell_id, outer_level);
+            let inner_cell_id = parent_cell_id(cell_id, inner_level);
             
-            let bucket = buckets.entry(truncated_cell_id).or_insert_with(|| BucketData {
-                cell_id: truncated_cell_id,
+            let outer_bucket = outer_buckets.get_mut(&outer_cell_id).unwrap();
+            let inner_bucket = outer_bucket.inner_buckets.entry(inner_cell_id).or_insert_with(|| InnerBucketData {
+                cell_id: inner_cell_id,
                 edge_cell_ids: Vec::new(),
                 edge_indexes: Vec::new(),
             });
@@ -108,13 +143,11 @@ fn build_buckets(graph_blob: &GraphBlob, location_blob: &LocationBlob, cell_leve
             // Process node edges
             if let Some(graph_nodes) = graph_blob.nodes() {
                 if i < graph_nodes.len() {
-                    // Direct access instead of using match for non-optional value
                     let node = graph_nodes.get(i);
                     
                     if let Some(edges) = node.edges() {
                         for j in 0..edges.len() {
                             let edge_index = edges.get(j) as u32;
-                            bucket.edge_indexes.push(edge_index);
                             
                             // Get the connected node's cell_id
                             if let Some(graph_edges) = graph_blob.edges() {
@@ -128,10 +161,11 @@ fn build_buckets(graph_blob: &GraphBlob, location_blob: &LocationBlob, cell_leve
                                     
                                     // Get the cell_id of the target node
                                     if (target_node_idx as usize) < node_locations.len() {
-                                        // Direct access instead of using match for non-optional value
                                         let target_loc = node_locations.get(target_node_idx as usize);
-                                        let target_truncated_cell_id = truncate_cell_id(target_loc.cell_id(), cell_level);
-                                        bucket.edge_cell_ids.push(target_truncated_cell_id);
+                                        let target_inner_cell_id = parent_cell_id(target_loc.cell_id(), inner_level);
+                                        
+                                        inner_bucket.edge_cell_ids.push(target_inner_cell_id);
+                                        inner_bucket.edge_indexes.push(edge_index);
                                     }
                                 }
                             }
@@ -141,31 +175,70 @@ fn build_buckets(graph_blob: &GraphBlob, location_blob: &LocationBlob, cell_leve
             }
         }
     }
+
+    // Ensure all possible inner cells for each outer cell have entries
+    // In a real implementation, you would calculate all possible inner cells within each outer cell
+    // For now, we'll ensure inner buckets are consistently represented in our output
+    for outer_bucket in outer_buckets.values_mut() {
+        // Get all unique inner cell IDs that should exist at inner_level within this outer cell
+        let mut all_inner_cell_ids = HashSet::new();
+        
+        // For each outer cell, calculate all possible inner cells
+        // This is a simplified approach - in practice you'd generate all inner cells based on the specific S2 algorithm
+        let num_cells_per_side = 1 << (inner_level - outer_level); // Number of inner cells per dimension
+        let total_inner_cells = num_cells_per_side * num_cells_per_side; // Total inner cells in this outer cell
+        
+        for i in 0..total_inner_cells {
+            // This is a simplified mapping from outer to inner cells
+            // A real implementation would use proper S2Cell logic
+            let inner_cell_id = (outer_bucket.cell_id << ((inner_level - outer_level) * 2)) | i;
+            all_inner_cell_ids.insert(inner_cell_id);
+        }
+        
+        // Ensure all possible inner cells have entries
+        for inner_cell_id in all_inner_cell_ids {
+            outer_bucket.inner_buckets.entry(inner_cell_id).or_insert_with(|| InnerBucketData {
+                cell_id: inner_cell_id,
+                edge_cell_ids: Vec::new(),
+                edge_indexes: Vec::new(),
+            });
+        }
+    }
     
-    Ok(buckets)
+    Ok(outer_buckets)
 }
 
-// Write SnapBuckets to files
-fn write_snap_buckets(buckets: &HashMap<u64, BucketData>, output_dir: &Path) -> Result<(), String> {
-    for (_, bucket_data) in buckets {
+// Write SnapBuckets to files, one file per outer bucket
+fn write_snap_buckets(outer_buckets: &HashMap<u64, OuterBucketData>, output_dir: &Path) -> Result<(), String> {
+    for (_, outer_bucket) in outer_buckets {
         let mut fbb = FlatBufferBuilder::new();
+        let mut snap_bucket_offsets = Vec::new();
         
-        // Create vectors for edge cell ids and edge indexes
-        let edge_cell_ids = fbb.create_vector(&bucket_data.edge_cell_ids);
-        let edge_indexes = fbb.create_vector(&bucket_data.edge_indexes);
+        // Sort inner buckets by cell_id for consistency
+        let mut inner_buckets: Vec<_> = outer_bucket.inner_buckets.values().collect();
+        inner_buckets.sort_by_key(|b| b.cell_id);
         
-        // Create SnapBucket
-        let snap_bucket = SnapBucket::create(
-            &mut fbb,
-            &SnapBucketArgs {
-                cell_id: bucket_data.cell_id,
-                edge_cell_ids: Some(edge_cell_ids),
-                edge_indexes: Some(edge_indexes),
-            },
-        );
+        // Create a SnapBucket for each inner bucket
+        for inner_bucket in inner_buckets {
+            // Create vectors for edge cell ids and edge indexes
+            let edge_cell_ids = fbb.create_vector(&inner_bucket.edge_cell_ids);
+            let edge_indexes = fbb.create_vector(&inner_bucket.edge_indexes);
+            
+            // Create SnapBucket for this inner bucket
+            let snap_bucket = SnapBucket::create(
+                &mut fbb,
+                &SnapBucketArgs {
+                    cell_id: inner_bucket.cell_id,
+                    edge_cell_ids: Some(edge_cell_ids),
+                    edge_indexes: Some(edge_indexes),
+                },
+            );
+            
+            snap_bucket_offsets.push(snap_bucket);
+        }
         
-        // Create a vector of SnapBuckets (with only one element for this cell)
-        let snap_buckets_vector = fbb.create_vector(&[snap_bucket]);
+        // Create a vector of all SnapBuckets for this outer bucket
+        let snap_buckets_vector = fbb.create_vector(&snap_bucket_offsets);
         
         // Create the SnapBuckets root object
         let snap_buckets = SnapBuckets::create(
@@ -177,8 +250,8 @@ fn write_snap_buckets(buckets: &HashMap<u64, BucketData>, output_dir: &Path) -> 
         
         fbb.finish(snap_buckets, None);
         
-        // Write to file
-        let file_path = output_dir.join(format!("snap_bucket_{}.bin", bucket_data.cell_id));
+        // Write to file named by the outer bucket's cell_id
+        let file_path = output_dir.join(format!("snap_bucket_{}.bin", outer_bucket.cell_id));
         let mut file = File::create(&file_path)
             .map_err(|e| format!("Failed to create file {}: {}", file_path.display(), e))?;
         

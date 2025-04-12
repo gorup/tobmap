@@ -5,9 +5,13 @@ use snapbuild::Config;
 #[derive(Debug, StructOpt)]
 #[structopt(name = "snapbuild", about = "Generate SnapBuckets files from graph and location data")]
 struct Opt {
-    /// Cell level for truncating cell IDs
-    #[structopt(short, long, default_value = "4")]
-    cell_level: u8,
+    /// Outer cell level for organizing SnapBuckets files
+    #[structopt(short = "o", long = "outer-level", default_value = "4")]
+    outer_cell_level: u8,
+
+    /// Inner cell level for organizing edges within SnapBuckets
+    #[structopt(short = "i", long = "inner-level", default_value = "8")]
+    inner_cell_level: u8,
 
     /// Path to the graph blob file
     #[structopt(short, long, default_value = "graph.bin")]
@@ -28,7 +32,8 @@ fn main() {
     
     // Create config from command line arguments
     let config = Config {
-        cell_level: opt.cell_level,
+        outer_cell_level: opt.outer_cell_level,
+        inner_cell_level: opt.inner_cell_level,
         graph_path: opt.graph,
         location_path: opt.location,
         output_dir: opt.output,
