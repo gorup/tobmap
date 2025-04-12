@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use flatbuffers::FlatBufferBuilder;
+use s2::{cell::Cell, cellid::CellID};
 use schema::graph_generated::tobmapgraph::{GraphBlob, LocationBlob};
 use schema::snap_generated::tobmapsnap::{SnapBucket, SnapBucketArgs, SnapBuckets, SnapBucketsArgs};
 
@@ -85,12 +86,16 @@ struct OuterBucketData {
     inner_buckets: HashMap<u64, InnerBucketData>,
 }
 
-// Truncate a cell_id to a specific level using S2Cell-like logic
+// Truncate a cell_id to a specific level using S2 library
 fn parent_cell_id(cell_id: u64, level: u8) -> u64 {
-    // For S2Cells, we can get the parent by shifting right by 2 bits per level
-    // This assumes cell_id is at least level 25 and we're going down to a lower level
-    let shift_bits = (25 - level) * 2;
-    (cell_id >> shift_bits) << shift_bits
+    let s2_cell_id = CellID(cell_id);
+    s2_cell_id.parent(level as u64).0
+}
+
+// Convert cell ID to token string representation
+fn cell_id_to_token(cell_id: u64, level: u8) -> String {
+    let s2_cell_id = CellID(cell_id);
+    s2_cell_id.to_token()
 }
 
 // Build outer buckets with inner buckets grouped by cell IDs
@@ -250,8 +255,18 @@ fn write_snap_buckets(outer_buckets: &HashMap<u64, OuterBucketData>, output_dir:
         
         fbb.finish(snap_buckets, None);
         
-        // Write to file named by the outer bucket's cell_id
-        let file_path = output_dir.join(format!("snap_bucket_{}.bin", outer_bucket.cell_id));
+        // Use S2 library to get cell info
+        let s2_cell_id = CellID(outer_bucket.cell_id);
+        let cell = Cell::from(s2_cell_id);
+        let level = cell.level();
+        let token = s2_cell_id.to_token();
+        
+        // Log the outer bucket cell ID and its token
+        println!("Processing outer bucket - Cell ID: {}, Token: {}, Level: {}", 
+                 outer_bucket.cell_id, token, level);
+        
+        // Write to file named by the outer bucket's token
+        let file_path = output_dir.join(format!("snap_bucket_{}.bin", token));
         let mut file = File::create(&file_path)
             .map_err(|e| format!("Failed to create file {}: {}", file_path.display(), e))?;
         
