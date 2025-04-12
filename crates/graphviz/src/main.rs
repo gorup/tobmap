@@ -100,44 +100,17 @@ fn draw_arrow_head(image: &mut RgbImage, from: (f32, f32), to: (f32, f32), color
     draw_line_segment_mut(image, to, point2, color);
 }
 
-/// Calculate color from speed (distance/time)
-/// Slow segments are red, fast segments are green
-fn get_speed_color(speed_meters_per_second: f32) -> Rgb<u8> {
-    // Define thresholds for speed (in m/s)
-    // Walking: ~1.4 m/s
-    // Cycling: ~5-8 m/s
-    // Car in city: ~8-14 m/s
+/// Calculate color from cost (0-15)
+/// 0 = green, 15 = red, values in between are on a gradient
+fn get_cost_color(cost: u8) -> Rgb<u8> {
+    // Ensure cost is in range 0-15
+    let cost = cost.min(15);
     
-    // Normalize speed to a 0.0 - 1.0 scale with cutoffs
-    // 0 m/s (stopped) -> 0.0 (full red)
-    // 15 m/s (~54 km/h) or faster -> 1.0 (full green)
-    let normalized = (speed_meters_per_second / 15.0).min(1.0);
-    
-    // Calculate red and green components
-    let red = 255 - (normalized * 255.0) as u8;
-    let green = (normalized * 255.0) as u8;
+    // Calculate red and green components - flipped from previous implementation
+    let red = (cost as u32 * 255 / 15) as u8;
+    let green = 255 - (cost as u32 * 255 / 15) as u8;
     
     Rgb([red, green, 0])
-}
-
-/// Calculate distance in meters between two lat/lng points
-fn calculate_distance(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f32 {
-    // Convert to radians
-    let lat1_rad = lat1.to_radians();
-    let lng1_rad = lng1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let lng2_rad = lng2.to_radians();
-    
-    // Earth radius in meters
-    const EARTH_RADIUS: f64 = 6371000.0;
-    
-    // Haversine formula
-    let dlat = lat2_rad - lat1_rad;
-    let dlng = lng2_rad - lng1_rad;
-    let a = (dlat/2.0).sin().powi(2) + lat1_rad.cos() * lat2_rad.cos() * (dlng/2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-    
-    (EARTH_RADIUS * c) as f32
 }
 
 /// Main function to create PNG visualization from graph data
@@ -197,7 +170,7 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     // Create an empty white image
     let mut image = RgbImage::new(img_width, img_height);
     let white = Rgb([255, 255, 255]);
-    let point_color = Rgb([0, 0, 0]);
+    let gray = Rgb([128, 128, 128]);
     
     // Fill with white
     for pixel in image.pixels_mut() {
@@ -226,32 +199,16 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
             continue;
         }
         
-        let (lng1, lat1) = node_positions[node1_idx];
-        let (lng2, lat2) = node_positions[node2_idx];
-        let (x1, y1) = to_img_coords(lng1, lat1);
-        let (x2, y2) = to_img_coords(lng2, lat2);
+        let (x1, y1) = to_img_coords(node_positions[node1_idx].0, node_positions[node1_idx].1);
+        let (x2, y2) = to_img_coords(node_positions[node2_idx].0, node_positions[node2_idx].1);
 
         // Check if backwards direction is allowed (last bit of costs_and_flags)
-        let costs_and_flags: u16 = edge.costs_and_flags();
-        let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
-        
-        // Get cost in seconds to traverse
-        let cost_seconds: u16 = costs_and_flags >> 4;
-        
-        // Calculate distance in meters
-        let distance = calculate_distance(lat1, lng1, lat2, lng2);
-        
-        // Calculate speed in meters per second
-        // Avoid division by zero
-        let speed = if cost_seconds > 0 {
-            distance / cost_seconds as f32
-        } else {
-            // If cost is 0 (shouldn't be) do 1
-            1.0
-        };
-        
-        // Get color based on speed
-        let edge_color = get_speed_color(speed);
+        let costs_and_flags = edge.costs_and_flags();
+        let backwards_allowed = (costs_and_flags & 0b0000_0001) != 0;
+        let cost: u8 = (costs_and_flags >> 2) as u8;
+
+        // Get color based on cost (0-15)
+        let edge_color = get_cost_color(cost);
 
         // Draw the edge with configurable width
         draw_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color);
@@ -272,7 +229,7 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         let (x, y) = to_img_coords(*lng, *lat);
         
         // Draw a circle with the specified size
-        draw_filled_circle_mut(&mut image, (x as i32, y as i32), args.node_size as i32, point_color);
+        draw_filled_circle_mut(&mut image, (x as i32, y as i32), args.node_size as i32, gray);
         
         // If requested, draw node indices as labels
         if args.show_labels {
