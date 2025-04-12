@@ -35,14 +35,19 @@ pub fn process(config: &Config) -> Result<(), String> {
     // Read location data
     let location_data = read_binary_file(&config.location_path)
         .map_err(|e| format!("Failed to read location file: {}", e))?;
+
+    // Use get_root_with_opts instead of root for better error handling and custom verifier options
+    let verifier_opts = flatbuffers::VerifierOptions {
+        max_tables: 3_000_000_000, // 3 billion tables
+        ..Default::default()
+    };
     
     // Parse graph blob
-    let graph_blob = flatbuffers::root::<GraphBlob>(&graph_data)
-        .map_err(|e| format!("Failed to parse graph blob: {}", e))?;
-    
-    // Parse location blob
-    let location_blob = flatbuffers::root::<LocationBlob>(&location_data)
-        .map_err(|e| format!("Failed to parse location blob: {}", e))?;
+    let graph_blob = flatbuffers::root_with_opts::<GraphBlob>(&verifier_opts, &graph_data)
+        .expect("Failed to parse graph data from buffer");
+        
+    let location_blob = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_data)
+        .expect("Failed to parse location data from buffer");
     
     // Create output directory if it doesn't exist
     fs::create_dir_all(&config.output_dir)
