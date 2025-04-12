@@ -15,4 +15,11 @@ cargo run --release --bin graphbuild ../Downloads/washington-latest.osm.pbf outp
 cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --location outputs/walatest.graph.location.fb --output png.png
 ```
 
+```
+ cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --location outputs/walatest.graph.location.fb --output png.png --center-lat=47.814204 --center-lng=-119.045459 --zoom-meters=30000 --edge-width=5 --node-size=2
+```
+
+```
+cargo run --release --bin server -- -s outputs/snapbuckets
+```
 Crazy!
