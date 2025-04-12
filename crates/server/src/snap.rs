@@ -1,7 +1,7 @@
 use tonic::{transport::Server, Request, Response, Status};
 
 use tobmapapi::snap_service_server::{SnapService, SnapServiceServer};
-use tobmapapi::{SnapRequest, SnapResponse};
+use tobmapapi::{SnapRequest, SnapResponse, SnapResponseDebugInfo};
 
 pub mod tobmapapi {
     tonic::include_proto!("tobmapapi");
@@ -25,6 +25,7 @@ impl SnapService for MySnapService {
             edge_index: 1,
             lat: req.lat,
             lng: req.lng,
+            debug_info: None,
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting

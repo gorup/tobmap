@@ -11,8 +11,14 @@ message SnapRequest {
     double lng = 2;
 }
 
+message SnapResponseDebugInfo {
+  uint64 total_time_ns = 1;
+}
+
 message SnapResponse {
     uint64 edge_index = 1;
     double lat = 2;
     double lng = 3;
+
+    SnapResponseDebugInfo debug_info = 4;
 }
