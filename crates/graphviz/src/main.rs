@@ -100,8 +100,57 @@ fn draw_arrow_head(image: &mut RgbImage, from: (f32, f32), to: (f32, f32), color
     draw_line_segment_mut(image, to, point2, color);
 }
 
-/// Calculate color from cost (0-15)
-/// 0 = green, 15 = red, values in between are on a gradient
+/// Calculate color based on speed (distance/time)
+/// Slow segments are red, fast segments are green
+fn get_speed_color(distance_meters: f64, time_seconds: u16) -> Rgb<u8> {
+    // Avoid division by zero
+    if time_seconds == 0 {
+        return Rgb([0, 255, 0]); // Maximum green for instant travel
+    }
+    
+    // Calculate speed in m/s
+    let speed = distance_meters / time_seconds as f64;
+    
+    // Define thresholds for coloring (adjust these based on your data)
+    // These values represent walking/cycling/driving speeds roughly
+    let slow_threshold = 1.5;  // m/s (walking pace ~5 km/h)
+    let fast_threshold = 13.0; // m/s (fast road ~47 km/h)
+    
+    // Normalize speed to 0-1 range
+    let normalized = if speed <= slow_threshold {
+        0.0
+    } else if speed >= fast_threshold {
+        1.0
+    } else {
+        (speed - slow_threshold) / (fast_threshold - slow_threshold)
+    };
+    
+    // Convert to RGB (red to green)
+    let red = ((1.0 - normalized) * 255.0) as u8;
+    let green = (normalized * 255.0) as u8;
+    
+    Rgb([red, green, 0])
+}
+
+/// Calculate distance between two lat/lng points in meters
+fn haversine_distance(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
+    let earth_radius = 6371000.0; // Earth radius in meters
+    
+    let lat1_rad = lat1.to_radians();
+    let lat2_rad = lat2.to_radians();
+    let dlat = (lat2 - lat1).to_radians();
+    let dlng = (lng2 - lng1).to_radians();
+    
+    let a = (dlat/2.0).sin() * (dlat/2.0).sin() + 
+            lat1_rad.cos() * lat2_rad.cos() * 
+            (dlng/2.0).sin() * (dlng/2.0).sin();
+    let c = 2.0 * a.sqrt().atan2((1.0-a).sqrt());
+    
+    earth_radius * c
+}
+
+// Keeping the old function for compatibility but mark it as deprecated
+#[deprecated]
 fn get_cost_color(cost: u8) -> Rgb<u8> {
     // Ensure cost is in range 0-15
     let cost = cost.min(15);
@@ -204,11 +253,19 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
 
         // Check if backwards direction is allowed (last bit of costs_and_flags)
         let costs_and_flags = edge.costs_and_flags();
-        let backwards_allowed = (costs_and_flags & 0b0000_0001) != 0;
-        let cost: u8 = (costs_and_flags >> 2) as u8;
+        let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
+        let time_seconds: u16 = (costs_and_flags >> 2) as u16;
 
-        // Get color based on cost (0-15)
-        let edge_color = get_cost_color(cost);
+        // Calculate distance between nodes
+        let distance_meters = haversine_distance(
+            node_positions[node1_idx].1,
+            node_positions[node1_idx].0,
+            node_positions[node2_idx].1,
+            node_positions[node2_idx].0,
+        );
+
+        // Get color based on speed
+        let edge_color = get_speed_color(distance_meters, time_seconds);
 
         // Draw the edge with configurable width
         draw_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color);
