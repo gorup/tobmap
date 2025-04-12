@@ -443,7 +443,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         };
         
         // Set the costs_and_flags: bits 0-13 for cost in seconds, bit 15 for backwards_allowed
-        let costs_and_flags: u16 = drive_cost | (if *backwards_allowed { 0b1000_0000_0000_0000 } else { 0 });
+        let costs_and_flags: u16 = drive_cost << 2 | (if *backwards_allowed { 0b0000_0000_0000_0001 } else { 0 });
         
         // Create edge directly as a struct 
         let edge = Edge::new(
