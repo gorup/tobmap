@@ -653,7 +653,7 @@ fn merge_travel_costs(cost1: f32, cost2: f32) -> f32 {
 }
 
 // Convert from speed to cost value 0-15 (0 = fastest, 15 = slowest)
-fn speed_to_cost_value(speed_mph: f32) -> u8 {
+fn speed_to_cost_value(speed_mph: f32) -> u16 {
     if speed_mph <= 0.0 {
         return 15; // Not allowed or extremely slow
     }
