@@ -10,7 +10,7 @@ use std::path::PathBuf;
 #[clap(author, version, about = "TobMap Snap Service")]
 struct Args {
     /// Directory containing snapbucket files
-    #[clap(short, long, default_value = "/workspaces/tobmap/snapbuckets")]
+    #[clap(short, long)]
     snapbuckets_dir: PathBuf,
 
     /// Outer cell level for S2 cells
