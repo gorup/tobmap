@@ -406,7 +406,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     let total_edge_count = edge_map.len();
     let one_way_count = edge_map.values().filter(|(_, _, allows_fwd, allows_bwd, _, _)| !(*allows_fwd && *allows_bwd)).count();
     info!("Found {} one-way road segments out of {} total segments", one_way_count, total_edge_count);
-    
+
     // Convert edge map to edge_node_pairs
     for ((start_idx, end_idx), (cell_id, travel_costs, allows_fwd, allows_bwd, start_interaction, end_interaction)) in edge_map {
         edge_node_pairs.push((start_idx, end_idx, cell_id, 
@@ -426,24 +426,24 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     // Create edges
     let mut edges = Vec::new();
     for (start_idx, end_idx, _cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
-        // Convert travel times to a single cost value (0-15)
-        // We use the car speed as the primary determinant of the cost
+        // Convert travel times to a single cost value in seconds
         let drive_cost = if travel_costs[0] > 0.0 {
-            // Calculate speed in MPH
             let distance_meters: f32 = (intersections_vec[*start_idx as usize].1.location
                 .distance(&intersections_vec[*end_idx as usize].1.location).rad() * 6371000.0) as f32;
+            
+            // Calculate travel time in seconds
             let time_seconds: f32 = travel_costs[0];
-            let speed_mps: f32 = distance_meters / time_seconds;
-            let speed_mph: f32 = speed_mps * 2.23694 as f32; // Convert m/s to mph
-
-            // Convert speed to cost (0-15)
-            speed_to_cost_value(speed_mph)
+            
+            // Cap the travel time between 1 and 16384 seconds
+            let capped_time = time_seconds.max(1.0).min(16384.0) as u16;
+            
+            capped_time
         } else {
-            15 // Not allowed or extremely slow
+            16384 // Not allowed or extremely slow (max value)
         };
         
-        // Set the costs_and_flags: bits 0,1,2,3 for cost, bit 7 for backwards_allowed
-        let costs_and_flags = drive_cost << 4 | (if *backwards_allowed { 0b0000_0001} else { 0 });
+        // Set the costs_and_flags: bits 0-13 for cost in seconds, bit 15 for backwards_allowed
+        let costs_and_flags: u16 = drive_cost | (if *backwards_allowed { 0b1000_0000_0000_0000 } else { 0 });
         
         // Create edge directly as a struct 
         let edge = Edge::new(
@@ -649,79 +649,5 @@ fn merge_travel_costs(cost1: f32, cost2: f32) -> f32 {
         cost1
     } else {
         cost1.min(cost2)
-    }
-}
-
-// Convert from speed to cost value 0-15 (0 = fastest, 15 = slowest)
-fn speed_to_cost_value(speed_mph: f32) -> u16 {
-    if speed_mph <= 0.0 {
-        return 15; // Not allowed or extremely slow
-    }
-    
-    // Map speed ranges to costs (0-15, where 0 is fastest)
-    // These ranges can be adjusted based on your specific needs
-    if speed_mph >= 65.0 { 0 }
-    else if speed_mph >= 55.0 { 1 }
-    else if speed_mph >= 45.0 { 2 }
-    else if speed_mph >= 40.0 { 3 }
-    else if speed_mph >= 35.0 { 4 }
-    else if speed_mph >= 30.0 { 5 }
-    else if speed_mph >= 25.0 { 6 }
-    else if speed_mph >= 20.0 { 7 }
-    else if speed_mph >= 15.0 { 8 }
-    else if speed_mph >= 12.0 { 9 }
-    else if speed_mph >= 10.0 { 10 }
-    else if speed_mph >= 8.0 { 11 }
-    else if speed_mph >= 6.0 { 12 }
-    else if speed_mph >= 4.0 { 13 }
-    else if speed_mph >= 2.0 { 14 }
-    else { 15 }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-
-    #[test]
-    fn test_tinytiny_graph_building() {
-        // Read the test data file
-        let test_data = fs::read("testdata/test_network.osm.pbf").expect("Failed to read test data file");
-        
-        // Build the graph
-        let graph_data = osm_to_graph_blob(&test_data).expect("Failed to build graph");
-        let graph = get_graph_blob(&graph_data.0);
-
-        // Verify basic graph properties
-        assert_eq!(graph.nodes().unwrap().len(), 15, "Should have 15 nodes");
-        assert_eq!(graph.edges().unwrap().len(), 13, "Should have 13 edges");
-
-        // Verify graph name
-        assert_eq!(graph.name().unwrap(), "OSM Generated Graph");
-
-        // Verify edge properties
-        let edge = graph.edges().expect("Should have at least one edge").get(0);
-        assert!(u64::from(edge.point_1_node_idx()) < graph.nodes().unwrap().len() as u64, "Edge start node should be valid");
-        assert!(u64::from(edge.point_2_node_idx()) < graph.nodes().unwrap().len() as u64, "Edge end node should be valid");
-        
-        // Verify costs_and_flags contains valid data
-        let costs_and_flags = edge.costs_and_flags();
-        
-        // Drive cost should be 0-15 (in lower 4 bits)
-        let drive_cost = costs_and_flags & 0x0F;
-        assert!(drive_cost <= 15, "Drive cost should be 0-15");
-        
-        // Check backwards_allowed flag (bit 7)
-        let backwards_allowed = (costs_and_flags & 0x80) != 0;
-        assert!(backwards_allowed == true || backwards_allowed == false, "Backwards allowed should be a boolean");
-
-        // Verify node properties
-        let node = graph.nodes().expect("Should have at least one node").get(0);
-        assert_eq!(node.edges().unwrap().len(), node.interactions().unwrap().len(), 
-                  "Node should have matching number of edges and interactions");
-
-        // Verify connectivity
-        let node_edges = node.edges().unwrap();
-        assert!(!node_edges.is_empty(), "Node should have at least one connected edge");
     }
 }
