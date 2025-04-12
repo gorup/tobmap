@@ -1,10 +1,17 @@
 [package]
 name = "snapbuild"
-version = "0.0.0"
-edition = "2024"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-flatbuffers = "*"
-s2 = "*"
+flatbuffers = "25.2.10"
+structopt = "0.3.26"
 schema = { path = "../schema" }
-rkyv = { version = "0.7.42", features = ["validation"] }
+
+[lib]
+name = "snapbuild"
+path = "src/lib.rs"
+
+[[bin]]
+name = "snapbuild"
+path = "src/main.rs"
