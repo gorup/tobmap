@@ -57,6 +57,7 @@ struct Intersection {
 struct RoadSegment {
     id: i64,
     nodes: Vec<i64>,
+    points: Vec<LatLng>, // Added: Store LatLng points for the segment
     speed_model: SpeedModel,
     is_oneway: bool,
     interactions: HashMap<i64, RoadInteraction>,
@@ -167,7 +168,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     
     info!("Found {} intersections", intersections.len());
     
-    // Build road segments with speed models
+    // Build road segments with speed models and points
     let mut road_segments: Vec<RoadSegment> = Vec::new();
     let mut oneway_count = 0;
     for (way_id, way) in &ways {
@@ -277,10 +278,23 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
             
             interactions.insert(node_id.0, interaction);
         }
-        
+
+        // Collect LatLng points for the segment
+        let segment_points: Vec<LatLng> = way.nodes.iter()
+            .filter_map(|node_id| nodes.get(&node_id.0))
+            .map(|node| LatLng::from_degrees(node.lat(), node.lon()))
+            .collect();
+
+        // Skip segments with fewer than 2 points
+        if segment_points.len() < 2 {
+            warn!("Skipping way {} with less than 2 valid nodes.", way_id);
+            continue;
+        }
+
         road_segments.push(RoadSegment {
             id: *way_id,
             nodes: way.nodes.iter().map(|n| n.0).collect(),
+            points: segment_points, // Store points
             speed_model,
             is_oneway,
             interactions,
@@ -310,10 +324,13 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     let mut builder = FlatBufferBuilder::new();
     
     // Build edges
-    let mut edge_node_pairs = Vec::new();
+    // let mut edge_node_pairs = Vec::new();
     
-    // Create a map to deduplicate edges
-    let mut edge_map: HashMap<(u32, u32), (u64, Vec<f32>, bool, bool, RoadInteraction, RoadInteraction)> = HashMap::new();
+    // Create a map to deduplicate edges, now including points
+    // Key: (min_node_idx, max_node_idx)
+    // Value: (cell_id, travel_costs, allows_forward, allows_backward, start_interaction, end_interaction, points)
+    // Points are stored in the direction from min_node_idx to max_node_idx
+    let mut edge_map: HashMap<(u32, u32), (u64, Vec<f32>, bool, bool, RoadInteraction, RoadInteraction, Vec<LatLng>)> = HashMap::new();
     
     for segment in &road_segments {
         // Find intersection nodes along this segment
@@ -325,18 +342,34 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         
         // Create edges between consecutive intersection nodes
         for window in intersection_nodes.windows(2) {
-            if let [(start_pos, start_id), (end_pos, end_id)] = window {
-                if let (Some(start_idx), Some(end_idx)) = (node_id_to_index.get(start_id), node_id_to_index.get(end_id)) {
-                    // Skip if this isn't a meaningful edge (same position)
-                    if start_pos == end_pos {
+            if let [(start_pos_in_segment, start_id), (end_pos_in_segment, end_id)] = window {
+                if let (Some(&start_idx), Some(&end_idx)) = (node_id_to_index.get(start_id), node_id_to_index.get(end_id)) {
+                    // Skip if this isn't a meaningful edge (same node index)
+                    if start_idx == end_idx {
                         continue;
                     }
                     
+                    // Extract the points for this specific edge segment
+                    // Ensure start_pos < end_pos for slicing
+                    let edge_points_slice = if start_pos_in_segment < end_pos_in_segment {
+                        &segment.points[*start_pos_in_segment..=*end_pos_in_segment]
+                    } else {
+                        // This case should ideally not happen if nodes are ordered correctly in the way
+                        warn!("Segment node order issue detected for way {}", segment.id);
+                        continue; 
+                    };
+                    let mut edge_points = edge_points_slice.to_vec();
+
+                    // Skip edges with less than 2 points (should not happen after initial filter)
+                    if edge_points.len() < 2 {
+                        continue;
+                    }
+
                     let start_node = &intersections[start_id];
                     let end_node = &intersections[end_id];
                     
-                    // Get S2 distance in meters (radius earth meters)
-                    let distance_meters = start_node.location.distance(&end_node.location).rad() * 6371000.0;
+                    // Get S2 distance in meters (radius earth meters) using actual start/end points
+                    let distance_meters = edge_points.first().unwrap().distance(edge_points.last().unwrap()).rad() * 6371000.0;
                     
                     // Calculate midpoint lat/lng and convert to cell ID
                     let midpoint = LatLng::from_degrees(
@@ -373,63 +406,81 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
                     let end_interaction = segment.interactions.get(end_id).cloned().unwrap_or(RoadInteraction::None);
                     
                     // Create a canonical key for this edge (smaller node index first)
-                    let edge_key = if start_idx < end_idx {
-                        (*start_idx, *end_idx)
+                    let (min_idx, max_idx) = if start_idx < end_idx {
+                        (start_idx, end_idx)
                     } else {
-                        (*end_idx, *start_idx)
+                        (end_idx, start_idx)
                     };
+                    let edge_key = (min_idx, max_idx);
                     
-                    // Store the actual direction of this segment for proper merging of one-way segments
-                    let is_forward = start_idx < end_idx;
-                    let allows_forward = if is_forward { true } else { !segment.is_oneway };
-                    let allows_backward = if is_forward { !segment.is_oneway } else { true };
+                    // Determine direction relative to canonical key
+                    let is_canonical_forward = start_idx < end_idx;
+                    
+                    // Reverse points if this segment is in the reverse direction of the canonical key
+                    if !is_canonical_forward {
+                        edge_points.reverse();
+                    }
+
+                    // Determine allowed directions based on oneway tag and segment direction
+                    let allows_canonical_forward = if is_canonical_forward { true } else { !segment.is_oneway };
+                    let allows_canonical_backward = if is_canonical_forward { !segment.is_oneway } else { true };
                     
                     // Get entry or insert default
                     let entry = edge_map.entry(edge_key).or_insert_with(|| (
                         cell_id, 
                         travel_costs.clone(), 
-                        false, // allows_forward
-                        false, // allows_backward
-                        start_interaction, 
-                        end_interaction
+                        false, // allows_forward (relative to canonical key)
+                        false, // allows_backward (relative to canonical key)
+                        start_interaction, // Placeholder, might need adjustment based on direction
+                        end_interaction,   // Placeholder
+                        edge_points // Store points (already oriented canonically)
                     ));
                     
-                    // Update directional flags
-                    entry.2 |= allows_forward;
-                    entry.3 |= allows_backward;
+                    // Update directional flags based on canonical direction
+                    entry.2 |= allows_canonical_forward;
+                    entry.3 |= allows_canonical_backward;
                 }
             }
         }
     }
     
-    // Log the count of one-way segments
+    // Log the count of one-way segments (relative to canonical direction)
     let total_edge_count = edge_map.len();
-    let one_way_count = edge_map.values().filter(|(_, _, allows_fwd, allows_bwd, _, _)| !(*allows_fwd && *allows_bwd)).count();
+    // An edge is one-way if only one of allows_fwd/allows_bwd is true
+    let one_way_count = edge_map.values().filter(|(_, _, allows_fwd, allows_bwd, _, _, _)| *allows_fwd != *allows_bwd).count();
     info!("Found {} one-way road segments out of {} total segments", one_way_count, total_edge_count);
 
-    // Convert edge map to edge_node_pairs
-    for ((start_idx, end_idx), (cell_id, travel_costs, allows_fwd, allows_bwd, start_interaction, end_interaction)) in edge_map {
+    // Convert edge map to edge_node_pairs, now including points
+    let mut edge_node_pairs: Vec<(u32, u32, u64, Vec<f32>, bool, RoadInteraction, RoadInteraction, Vec<LatLng>)> = Vec::with_capacity(edge_map.len());
+    for ((start_idx, end_idx), (cell_id, travel_costs, allows_fwd, allows_bwd, start_interaction, end_interaction, points)) in edge_map {
+        // `backwards_allowed` means travel is possible from end_idx to start_idx (relative to the canonical key)
+        let backwards_allowed = allows_bwd; 
+        // Note: The stored edge in flatbuffer always goes from start_idx to end_idx.
+        // The `backwards_allowed` flag indicates if the reverse direction is also permitted.
+        // Interactions might need adjustment based on which direction is being considered during pathfinding.
         edge_node_pairs.push((start_idx, end_idx, cell_id, 
-                             travel_costs, allows_fwd && allows_bwd,
-                             start_interaction, end_interaction));
+                             travel_costs, backwards_allowed,
+                             start_interaction, end_interaction, points));
     }
 
     info!("Built {} deduplicated edge node pairs, will now sort edges by cell, took {:?}", edge_node_pairs.len(), last_time.elapsed());
     last_time = Instant::now();
     
     // Sort edges by cell ID for locality
-    edge_node_pairs.par_sort_by_key(|(_, _, cell_id, _, _, _, _)| CellID(*cell_id).to_token());
+    edge_node_pairs.par_sort_by_key(|(_, _, cell_id, _, _, _, _, _)| CellID(*cell_id).to_token());
  
     info!("Sorting done, will now create flatbuffer edges, took {:?}", last_time.elapsed());
     last_time = Instant::now();
 
     // Create edges
     let mut edges = Vec::new();
-    for (start_idx, end_idx, _cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction) in &edge_node_pairs {
-        // Convert travel times to a single cost value in seconds
+    // Keep track of points associated with the final edge index
+    let mut edge_index_to_points: Vec<Vec<LatLng>> = Vec::with_capacity(edge_node_pairs.len()); 
+
+    for (start_idx, end_idx, _cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction, points) in &edge_node_pairs {
         let drive_cost = if travel_costs[0] > 0.0 {
-            let distance_meters: f32 = (intersections_vec[*start_idx as usize].1.location
-                .distance(&intersections_vec[*end_idx as usize].1.location).rad() * 6371000.0) as f32;
+            let distance_meters: f32 = (points.first().unwrap()
+                .distance(points.last().unwrap()).rad() * 6371000.0) as f32;
             
             // Calculate travel time in seconds
             let time_seconds: f32 = travel_costs[0];
@@ -453,6 +504,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         );
         
         edges.push((edge, *start_idx, *end_idx, *start_interaction, *end_interaction, *backwards_allowed));
+        edge_index_to_points.push(points.clone()); // Store points corresponding to this edge index
     }
     
     info!("Built {} edges, will now build nodes with edges, took {:?}", edges.len(), last_time.elapsed());
@@ -477,12 +529,14 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     for (edge_idx, (_, start_idx, end_idx, start_interaction, end_interaction, backwards_allowed)) in edges.iter().enumerate() {
         if let Some(&start_pos) = node_to_pos.get(&(*start_idx as u32)) {
             nodes_with_edges[start_pos as usize].2.push(edge_idx);
-            nodes_with_edges[start_pos as usize].3.push((*start_interaction, *end_interaction));
+            // Interaction when leaving start_node towards end_node
+            nodes_with_edges[start_pos as usize].3.push((*start_interaction, *end_interaction)); 
         }
         
         if *backwards_allowed {
             if let Some(&end_pos) = node_to_pos.get(&(*end_idx as u32)) {
                 nodes_with_edges[end_pos as usize].2.push(edge_idx);
+                 // Interaction when leaving end_node towards start_node
                 nodes_with_edges[end_pos as usize].3.push((*end_interaction, *start_interaction));
             }
         }
@@ -580,14 +634,18 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     }
     let node_location_items_offset = location_builder.end_vector(node_locations.len());
     
-    // Store edge point locations
-    let mut edge_locations = Vec::with_capacity(edge_node_pairs.len());
-    for (_, _, cell_id, _, _, _, _) in &edge_node_pairs {
-        let points = vec![*cell_id];
-        let points_offset = location_builder.create_vector(&points);
+    // Store edge point locations (as cell IDs)
+    let mut edge_locations = Vec::with_capacity(edge_index_to_points.len()); // Use the stored points
+    for points_latlng in &edge_index_to_points { // Iterate through the points stored per edge index
+        // Convert Vec<LatLng> to Vec<u64> (Cell IDs)
+        let points_cell_ids: Vec<u64> = points_latlng.iter()
+            .map(|latlng| CellID::from(*latlng).0)
+            .collect();
+            
+        let points_offset = location_builder.create_vector(&points_cell_ids);
         
         let edge_location_args = EdgeLocationItemsArgs {
-            points: Some(points_offset)
+            points: Some(points_offset) // Store the vector of cell IDs
         };
         
         let edge_location = EdgeLocationItems::create(&mut location_builder, &edge_location_args);

@@ -244,6 +244,12 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
             "Mismatch between nodes count ({}) and node locations count ({})", 
             nodes.len(), node_locations.len())));
     }
+    // Verify we have the same number of edges and edge locations
+    if edges.len() != edge_locations.len() {
+        return Err(GraphVizError::ParseError(format!(
+            "Mismatch between edges count ({}) and edge locations count ({})",
+            edges.len(), edge_locations.len())));
+    }
     
     // Calculate bounds of the map
     let mut min_lat = f64::MAX;
@@ -322,6 +328,11 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         let y = (max_lat - lat) / height * img_height as f64;
         (x as f32, y as f32)
     };
+
+    // Helper to check if a point is within bounds
+    let is_in_bounds = |lng: f64, lat: f64| -> bool {
+        lng >= min_lng && lng <= max_lng && lat >= min_lat && lat <= max_lat
+    };
     
     // Arrow size for direction indicators (relative to edge width)
     let arrow_size = 6.0 * args.edge_width.max(1.0); // Ensure arrow size scales reasonably even for thin lines
@@ -329,49 +340,90 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     // Add edges to image
     for i in 0..edges.len() {
         let edge = edges.get(i);
+        let edge_location = edge_locations.get(i); // Get corresponding edge location data
+
         let node1_idx = edge.point_1_node_idx() as usize;
         let node2_idx = edge.point_2_node_idx() as usize;
         
         if node1_idx >= node_positions.len() || node2_idx >= node_positions.len() {
-            eprintln!("Warning: Edge references non-existent node");
+            eprintln!("Warning: Edge {} references non-existent node index {} or {}", i, node1_idx, node2_idx);
             continue;
         }
         
         let (lng1, lat1) = node_positions[node1_idx];
         let (lng2, lat2) = node_positions[node2_idx];
 
-        // Check if edge endpoints are within the calculated bounds before drawing
-        let is_p1_in_bounds = lng1 >= min_lng && lng1 <= max_lng && lat1 >= min_lat && lat1 <= max_lat;
-        let is_p2_in_bounds = lng2 >= min_lng && lng2 <= max_lng && lat2 >= min_lat && lat2 <= max_lat;
+        // Calculate overall edge properties (color based on total distance/time)
+        let costs_and_flags = edge.costs_and_flags();
+        let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
+        let time_seconds: u16 = (costs_and_flags >> 2) as u16;
+        let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
+        let edge_color = get_speed_color(distance_meters, time_seconds);
 
-        // Only draw if at least one endpoint is within bounds (line might cross the view)
-        if is_p1_in_bounds || is_p2_in_bounds {
-            let (x1, y1) = to_img_coords(lng1, lat1);
-            let (x2, y2) = to_img_coords(lng2, lat2);
+        // Construct the full path for the edge
+        let mut path_coords: Vec<(f64, f64)> = Vec::new();
+        path_coords.push((lng1, lat1)); // Start node
 
-            let costs_and_flags = edge.costs_and_flags();
-            let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
-            let time_seconds: u16 = (costs_and_flags >> 2) as u16;
+        if let Some(cell_ids) = edge_location.points() {
+            if cell_ids.len() > 0 {
+                for cell_id in cell_ids {
+                    let latlng = cell_id_to_latlng(cell_id);
+                    path_coords.push((latlng.lng.deg(), latlng.lat.deg()));
+                }
+            }
+        }
+        
+        path_coords.push((lng2, lat2)); // End node
 
-            let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
-            let edge_color = get_speed_color(distance_meters, time_seconds);
+        // Draw segments of the path
+        let mut last_img_coords: Option<(f32, f32)> = None;
+        for j in 0..path_coords.len() - 1 {
+            let (p1_lng, p1_lat) = path_coords[j];
+            let (p2_lng, p2_lat) = path_coords[j+1];
 
-            // Use the new thick line drawing function
-            draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color, args.edge_width);
-            
-            if !backwards_allowed {
-                // Draw arrow head near the destination node (point 2)
-                // Calculate a point slightly before the destination for the arrow base
-                let dx = x2 - x1;
-                let dy = y2 - y1;
-                let len = (dx*dx + dy*dy).sqrt();
-                let arrow_offset = (arrow_size * 1.5).min(len * 0.4); // Place arrow base back from the end point
+            // Check if segment is potentially visible
+            let p1_in_bounds = is_in_bounds(p1_lng, p1_lat);
+            let p2_in_bounds = is_in_bounds(p2_lng, p2_lat);
 
-                if len > 0.01 { // Avoid drawing arrows on zero-length segments
-                    let arrow_base_x = x2 - dx * arrow_offset / len;
-                    let arrow_base_y = y2 - dy * arrow_offset / len;
-                    // Pass edge_width to draw_arrow_head
-                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x2, y2), edge_color, arrow_size, args.edge_width);
+            // Simple visibility check: draw if either point is in bounds or line crosses bounds
+            // A more robust check would involve line clipping, but this is often sufficient
+            if p1_in_bounds || p2_in_bounds || line_crosses_bounds(p1_lng, p1_lat, p2_lng, p2_lat, min_lng, min_lat, max_lng, max_lat) {
+                let (x1, y1) = to_img_coords(p1_lng, p1_lat);
+                let (x2, y2) = to_img_coords(p2_lng, p2_lat);
+
+                draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color, args.edge_width);
+                last_img_coords = Some((x2, y2)); // Store the end coords of the last drawn segment
+            } else {
+                 // If segment is entirely out of bounds, reset last_img_coords for arrow drawing logic
+                 // This prevents drawing arrows for edges completely outside the view.
+                 // However, we need the *previous* point if the *last* segment ends in bounds.
+                 // Let's refine this: we need the image coords of the last *two* points of the path.
+            }
+        }
+
+        // Draw arrow head for one-way edges at the end of the last segment
+        if !backwards_allowed && path_coords.len() >= 2 {
+            let (p_last_lng, p_last_lat) = path_coords[path_coords.len() - 1];
+            let (p_second_last_lng, p_second_last_lat) = path_coords[path_coords.len() - 2];
+
+            // Check if the end point is within bounds before drawing arrow
+            if is_in_bounds(p_last_lng, p_last_lat) || is_in_bounds(p_second_last_lng, p_second_last_lat) {
+                let (x_last, y_last) = to_img_coords(p_last_lng, p_last_lat);
+                let (x_second_last, y_second_last) = to_img_coords(p_second_last_lng, p_second_last_lat);
+
+                let dx = x_last - x_second_last;
+                let dy = y_last - y_second_last;
+                let len_sq = dx*dx + dy*dy;
+
+                if len_sq > 0.01 { // Avoid drawing arrows on zero-length segments
+                    // Calculate arrow base position slightly back from the end point along the last segment
+                    let len = len_sq.sqrt();
+                    let arrow_offset = (arrow_size * 1.5).min(len * 0.4); // Place arrow base back from the end point
+
+                    let arrow_base_x = x_last - dx * arrow_offset / len;
+                    let arrow_base_y = y_last - dy * arrow_offset / len;
+
+                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), edge_color, arrow_size, args.edge_width);
                 }
             }
         }
@@ -379,7 +431,7 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     
     // Add nodes to image as circles
     for (i, &(lng, lat)) in node_positions.iter().enumerate() {
-        if lng >= min_lng && lng <= max_lng && lat >= min_lat && lat <= max_lat {
+        if is_in_bounds(lng, lat) { // Use helper function
             let (x, y) = to_img_coords(lng, lat);
             
             draw_filled_circle_mut(&mut image, (x as i32, y as i32), args.node_size as i32, gray);
@@ -392,6 +444,20 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     }
     
     Ok(image)
+}
+
+/// Simple line-rectangle intersection check (Axis-Aligned Bounding Box)
+/// Returns true if the line segment (p1 -> p2) potentially intersects or is inside the box.
+/// This is a basic check and not a full clipping algorithm.
+fn line_crosses_bounds(x1: f64, y1: f64, x2: f64, y2: f64, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> bool {
+    // Check if both points are outside on the same side
+    if (x1 < min_x && x2 < min_x) || (x1 > max_x && x2 > max_x) ||
+       (y1 < min_y && y2 < min_y) || (y1 > max_y && y2 > max_y) {
+        return false;
+    }
+    // Basic check passed, assume it might cross or be inside
+    // A more precise check (like Liang-Barsky) could be used here if needed.
+    true
 }
 
 fn main() -> Result<()> {
