@@ -22,4 +22,17 @@ cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --locati
 ```
 cargo run --release --bin server -- -s outputs/snapbuckets
 ```
+
+```
+{
+  "lat": 47.7283315,
+  "lng": -119.2441248
+}
+```
+
 Crazy!
+
+- I think we need a .ai_history file which says which lines of code were from AI, like git blame but points to what the prompt was and what the model was, among other things
+- Bit shifting was weird, I wanted right most and it did MSB, idk maybe im the weird one tho
+- I said to make a blob where we have more info about the edges and their points, but it still only grabbed start and end even though we had all of the intermediate point data available (curved roads are just sequences of points)
+- For snapping, 2 levels, outer is for a file, inner is within a file so you can quickly get to a L8 cell, then within that L8 cell we have the cell ids and their locations - it used the L8 Cell id for all edges within that cell for some reason!

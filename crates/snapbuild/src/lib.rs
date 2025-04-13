@@ -167,9 +167,8 @@ fn build_outer_buckets(
                                     // Get the cell_id of the target node
                                     if (target_node_idx as usize) < node_locations.len() {
                                         let target_loc = node_locations.get(target_node_idx as usize);
-                                        let target_inner_cell_id = parent_cell_id(target_loc.cell_id(), inner_level);
                                         
-                                        inner_bucket.edge_cell_ids.push(target_inner_cell_id);
+                                        inner_bucket.edge_cell_ids.push(target_loc.cell_id());
                                         inner_bucket.edge_indexes.push(edge_index);
                                     }
                                 }

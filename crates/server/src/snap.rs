@@ -91,6 +91,8 @@ impl MySnapService {
             if edge_cell_ids.len() == 0 {
                 return None;
             }
+
+            info!("num edges and indexes we'll look thru {} {}", edge_cell_ids.len(), edge_indexes.len());
             
             // Create S2 Cell for target position to calculate geographic distance
             let target_s2_cell = CellID(target_cell_id);
@@ -109,8 +111,11 @@ impl MySnapService {
                 // Calculate distance between points using the distance method
                 let dist = target_center.distance(&cell_center);
                 
+                // info!("Cell id {}, distance {:?}", s2_cell.to_token(), dist);
+
                 if dist < min_distance {
                     min_distance = dist;
+                    info!("Found closer edge: {} (distance: {:?})", s2_cell.to_token(), dist);
                     closest_index = i;
                     closest_cell_id = cell_id;
                 }
