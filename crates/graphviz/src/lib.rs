@@ -22,6 +22,16 @@ pub enum GraphVizError {
 
 pub type StatusOr<T> = Result<T, GraphVizError>;
 
+/// Configuration for tile-based rendering
+#[derive(Debug, Clone)]
+pub struct TileConfig {
+    pub rows: u32,         // Total number of rows in the grid
+    pub columns: u32,      // Total number of columns in the grid
+    pub row_index: u32,    // Current row to render (0-indexed)
+    pub column_index: u32, // Current column to render (0-indexed)
+    pub overlap_pixels: u32, // Overlap between tiles to avoid edge artifacts
+}
+
 /// Configuration for the visualization process.
 #[derive(Debug, Clone)]
 pub struct VizConfig {
@@ -34,6 +44,7 @@ pub struct VizConfig {
     pub zoom_meters: Option<f64>,
     pub highlight_edge_index: Option<u32>,
     pub highlight_edge_width: Option<f32>,
+    pub tile: Option<TileConfig>, // New field for tiling configuration
 }
 
 /// Converts S2 CellID to lat/lng
@@ -261,7 +272,6 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         max_lat = center_lat + delta_lat;
         min_lng = center_lng - delta_lng;
         max_lng = center_lng + delta_lng;
-
     } else {
         // Calculate bounds based on all nodes (existing behavior)
         for &(lng, lat) in &node_positions {
@@ -284,13 +294,66 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         )));
     }
 
-    // Ensure aspect ratio is preserved for the image canvas
-    let aspect_ratio = width / height;
-    let (img_width, img_height) = if aspect_ratio > 1.0 {
+    // Store original bounds for the complete map
+    let full_min_lat = min_lat;
+    let full_max_lat = max_lat;
+    let full_min_lng = min_lng;
+    let full_max_lng = max_lng;
+    let full_width = width;
+    let full_height = height;
+
+    // Calculate full image dimensions
+    let aspect_ratio = full_width / full_height;
+    let (full_img_width, full_img_height) = if aspect_ratio > 1.0 {
         (config.max_size, (config.max_size as f64 / aspect_ratio) as u32)
     } else {
         ((config.max_size as f64 * aspect_ratio) as u32, config.max_size)
     };
+
+    // Check if we're rendering a tile
+    let (img_width, img_height) = if let Some(tile) = &config.tile {
+        // Validate tile configuration
+        if tile.row_index >= tile.rows || tile.column_index >= tile.columns {
+            return Err(GraphVizError::ImageError(format!(
+                "Invalid tile indices: row_index={}, rows={}, column_index={}, columns={}",
+                tile.row_index, tile.rows, tile.column_index, tile.columns
+            )));
+        }
+
+        // Calculate the geographic bounds for this specific tile
+        let tile_width = full_width / tile.columns as f64;
+        let tile_height = full_height / tile.rows as f64;
+
+        // Calculate actual tile bounds with overlap
+        let overlap_lng = (tile.overlap_pixels as f64 / full_img_width as f64) * full_width;
+        let overlap_lat = (tile.overlap_pixels as f64 / full_img_height as f64) * full_height;
+
+        // Update bounds for this specific tile (with overlap)
+        min_lng = full_min_lng + tile.column_index as f64 * tile_width - (if tile.column_index > 0 { overlap_lng } else { 0.0 });
+        max_lng = full_min_lng + (tile.column_index + 1) as f64 * tile_width + (if tile.column_index + 1 < tile.columns { overlap_lng } else { 0.0 });
+        
+        // Note: latitude increases northward (upward) but image y-coordinates increase downward
+        max_lat = full_max_lat - tile.row_index as f64 * tile_height + (if tile.row_index > 0 { overlap_lat } else { 0.0 });
+        min_lat = full_max_lat - (tile.row_index + 1) as f64 * tile_height - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
+
+        // Calculate tile image dimensions (including overlap)
+        let tile_img_width = full_img_width / tile.columns + 
+            (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
+            (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
+        
+        let tile_img_height = full_img_height / tile.rows + 
+            (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
+            (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
+            
+        (tile_img_width, tile_img_height)
+    } else {
+        // Not tiling, use the full image dimensions
+        (full_img_width, full_img_height)
+    };
+
+    // Update width and height based on the potentially modified bounds
+    let width = max_lng - min_lng;
+    let height = max_lat - min_lat;
 
     // Create an empty white image
     let mut image = RgbImage::new(img_width, img_height);
