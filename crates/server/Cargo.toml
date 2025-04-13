@@ -11,6 +11,8 @@ tonic = "*"
 prost = "*"
 clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "*", features = ["macros", "rt-multi-thread"] }
+log = "*"
+env_logger = "*"
 
 [build-dependencies]
 tonic-build = "*"

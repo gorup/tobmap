@@ -68,6 +68,14 @@ struct Args {
     /// Width/Height of the zoomed view in meters
     #[arg(long)]
     zoom_meters: Option<f64>,
+
+    /// Index of an edge to highlight and log details for
+    #[arg(long)]
+    highlight_edge_index: Option<u32>,
+
+    /// Width for the highlighted edge (defaults to edge_width * 2 if not set)
+    #[arg(long)]
+    highlight_edge_width: Option<f32>,
 }
 
 /// Converts S2 CellID to lat/lng
@@ -315,6 +323,7 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
     let mut image = RgbImage::new(img_width, img_height);
     let white = Rgb([255, 255, 255]);
     let gray = Rgb([128, 128, 128]);
+    let yellow = Rgb([255, 255, 0]); // Highlight color
     
     // Fill with white
     for pixel in image.pixels_mut() {
@@ -353,20 +362,33 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         let (lng1, lat1) = node_positions[node1_idx];
         let (lng2, lat2) = node_positions[node2_idx];
 
+        // Determine if this is the highlighted edge
+        let is_highlighted_edge = args.highlight_edge_index.map_or(false, |idx| i == idx as usize);
+        
         // Calculate overall edge properties (color based on total distance/time)
         let costs_and_flags = edge.costs_and_flags();
         let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
         let time_seconds: u16 = (costs_and_flags >> 2) as u16;
         let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
-        let edge_color = get_speed_color(distance_meters, time_seconds);
+        
+        // Determine edge color and width
+        let mut current_edge_color = get_speed_color(distance_meters, time_seconds);
+        let mut current_edge_width = args.edge_width;
+
+        if is_highlighted_edge {
+            current_edge_color = yellow;
+            current_edge_width = args.highlight_edge_width.unwrap_or(args.edge_width * 2.0); // Use specified width or double the default
+        }
 
         // Construct the full path for the edge
         let mut path_coords: Vec<(f64, f64)> = Vec::new();
         path_coords.push((lng1, lat1)); // Start node
 
+        let mut intermediate_cell_ids: Vec<u64> = Vec::new();
         if let Some(cell_ids) = edge_location.points() {
             if cell_ids.len() > 0 {
                 for cell_id in cell_ids {
+                    intermediate_cell_ids.push(cell_id); // Store for logging
                     let latlng = cell_id_to_latlng(cell_id);
                     path_coords.push((latlng.lng.deg(), latlng.lat.deg()));
                 }
@@ -374,6 +396,37 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
         }
         
         path_coords.push((lng2, lat2)); // End node
+
+        // Log details if this is the highlighted edge
+        if is_highlighted_edge {
+            println!("--- Highlighting Edge Index: {} ---", i);
+            println!("  Graph Data:");
+            println!("    Node 1 Index: {}", node1_idx);
+            println!("    Node 2 Index: {}", node2_idx);
+            println!("    Costs and Flags Raw: {:#018b} ({})", costs_and_flags, costs_and_flags);
+            println!("    Backwards Allowed: {}", backwards_allowed);
+            println!("    Time (seconds): {}", time_seconds);
+            println!("  Location Data:");
+            println!("    Start Node Lat/Lng: ({}, {})", lat1, lng1);
+            println!("    End Node Lat/Lng: ({}, {})", lat2, lng2);
+            println!("    Intermediate Points ({}):", intermediate_cell_ids.len());
+            for (idx, cell_id) in intermediate_cell_ids.iter().enumerate() {
+                let latlng = cell_id_to_latlng(*cell_id);
+                println!("      [{}]: CellID={} -> Lat/Lng=({}, {})", idx, cell_id, latlng.lat.deg(), latlng.lng.deg());
+            }
+            println!("  Calculated Properties:");
+            println!("    Distance (meters): {:.2}", distance_meters);
+            if time_seconds > 0 {
+                println!("    Avg Speed (m/s): {:.2}", distance_meters / time_seconds as f64);
+                println!("    Avg Speed (km/h): {:.2}", (distance_meters / time_seconds as f64) * 3.6);
+            } else {
+                println!("    Avg Speed: Instantaneous (time = 0)");
+            }
+            println!("  Rendering:");
+            println!("    Color: Rgb({}, {}, {})", current_edge_color.0[0], current_edge_color.0[1], current_edge_color.0[2]);
+            println!("    Width: {}", current_edge_width);
+            println!("------------------------------------");
+        }
 
         // Draw segments of the path
         let mut last_img_coords: Option<(f32, f32)> = None;
@@ -391,7 +444,8 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
                 let (x1, y1) = to_img_coords(p1_lng, p1_lat);
                 let (x2, y2) = to_img_coords(p2_lng, p2_lat);
 
-                draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), edge_color, args.edge_width);
+                // Use the determined color and width
+                draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), current_edge_color, current_edge_width);
                 last_img_coords = Some((x2, y2)); // Store the end coords of the last drawn segment
             } else {
                  // If segment is entirely out of bounds, reset last_img_coords for arrow drawing logic
@@ -423,7 +477,8 @@ fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, args: &Args) -> S
                     let arrow_base_x = x_last - dx * arrow_offset / len;
                     let arrow_base_y = y_last - dy * arrow_offset / len;
 
-                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), edge_color, arrow_size, args.edge_width);
+                    // Use the determined color and width for the arrow
+                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), current_edge_color, arrow_size, current_edge_width);
                 }
             }
         }

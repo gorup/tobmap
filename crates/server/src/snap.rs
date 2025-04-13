@@ -4,7 +4,8 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use s2::{cell::Cell, cellid::CellID, latlng::LatLng};
+use s2::{cell::Cell, cellid::CellID, latlng::LatLng, point::Point};
+use log::{info, warn};
 
 use tobmapapi::snap_service_server::{SnapService, SnapServiceServer};
 use tobmapapi::{SnapRequest, SnapResponse, SnapResponseDebugInfo};
@@ -91,52 +92,31 @@ impl MySnapService {
                 return None;
             }
             
-            // Binary search to find the closest edge
-            let mut left = 0;
-            let mut right = edge_cell_ids.len() - 1;
+            // Create S2 Cell for target position to calculate geographic distance
+            let target_s2_cell = CellID(target_cell_id);
+            let target_center = Cell::from(target_s2_cell).center();
             
-            // Handle edge cases
-            if edge_cell_ids.len() == 1 {
-                return Some((edge_indexes.get(0), edge_cell_ids.get(0)));
-            }
+            let mut closest_index = 0;
+            let mut closest_cell_id = edge_cell_ids.get(0);
+            let mut min_distance = s2::s1::Angle::inf();
             
-            // Check if target is outside the range
-            if target_cell_id <= edge_cell_ids.get(0) {
-                return Some((edge_indexes.get(0), edge_cell_ids.get(0)));
-            }
-            
-            if target_cell_id >= edge_cell_ids.get(right) {
-                return Some((edge_indexes.get(right), edge_cell_ids.get(right)));
-            }
-            
-            // Binary search
-            while left <= right {
-                let mid = left + (right - left) / 2;
-                let mid_cell_id = edge_cell_ids.get(mid);
+            // Iterate through all edges and find the closest one geographically
+            for i in 0..edge_cell_ids.len() {
+                let cell_id = edge_cell_ids.get(i);
+                let s2_cell = CellID(cell_id);
+                let cell_center = Cell::from(s2_cell).center();
                 
-                if mid_cell_id == target_cell_id {
-                    return Some((edge_indexes.get(mid), mid_cell_id));
-                } else if mid_cell_id < target_cell_id {
-                    left = mid + 1;
-                } else {
-                    right = mid - 1;
+                // Calculate distance between points using the distance method
+                let dist = target_center.distance(&cell_center);
+                
+                if dist < min_distance {
+                    min_distance = dist;
+                    closest_index = i;
+                    closest_cell_id = cell_id;
                 }
             }
             
-            // After binary search, left is the insertion point
-            // Compare adjacent elements to find the closer one
-            if left >= edge_cell_ids.len() {
-                left = edge_cell_ids.len() - 1;
-            }
-            
-            let cell_id_left = edge_cell_ids.get(if left > 0 { left - 1 } else { 0 });
-            let cell_id_right = edge_cell_ids.get(left);
-            
-            if (target_cell_id - cell_id_left).abs_diff(0) < (target_cell_id - cell_id_right).abs_diff(0) {
-                return Some((edge_indexes.get(if left > 0 { left - 1 } else { 0 }), cell_id_left));
-            } else {
-                return Some((edge_indexes.get(left), cell_id_right));
-            }
+            return Some((edge_indexes.get(closest_index), closest_cell_id));
         }
         
         None
@@ -156,6 +136,8 @@ impl SnapService for MySnapService {
         // Convert lat/lng to S2 cell
         let lat_lng = LatLng::from_degrees(req.lat, req.lng);
         let cell_id = CellID::from(lat_lng);
+
+        info!("Received request for lat: {}, lng: {}, converted to cell ID: {}", req.lat, req.lng, cell_id.0);
         
         // Get the outer cell ID for the requested location
         let outer_cell_id = cell_id.parent(self.outer_cell_level as u64).0;
@@ -163,6 +145,8 @@ impl SnapService for MySnapService {
         // Get the inner cell ID for the requested location
         let inner_cell_id = cell_id.parent(self.inner_cell_level as u64).0;
         
+        info!("Outer cell ID: {}, Inner cell ID: {}", outer_cell_id, inner_cell_id);
+
         // Debug info
         // let mut debug_info = SnapResponseDebugInfo {
         //     outer_cell_id,
@@ -185,6 +169,7 @@ impl SnapService for MySnapService {
                         for i in 0..buckets.len() {
                             let snap_bucket = buckets.get(i);
                             if snap_bucket.cell_id() == inner_cell_id {
+                                info!("Found snap bucket, {}", snap_bucket.cell_id());
                                 // debug_info.found_inner_cell = true;
                                 
                                 // Set the number of edges in this bucket

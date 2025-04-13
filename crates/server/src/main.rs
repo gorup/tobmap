@@ -29,6 +29,8 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+
+    env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
     
     let addr = args.address.parse()?;
     let snap_service = MySnapService::new(
