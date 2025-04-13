@@ -1,16 +1,18 @@
 use std::fs::File;
 use std::io::Read;
 use std::path::PathBuf;
+use std::ffi::OsStr;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
+use image::ImageFormat; // Import ImageFormat
 use schema::tobmapgraph::{GraphBlob, LocationBlob};
 
 // Import from the library crate
 use graphviz::{visualize_graph, VizConfig};
 
 #[derive(Parser, Debug)]
-#[command(author, version, about = "Generate PNG visualization of graph data")]
+#[command(author, version, about = "Generate PNG/JPG visualization of graph data")]
 struct Args {
     /// Path to the input graph.fbs file
     #[arg(short = 'g', long)]
@@ -20,9 +22,8 @@ struct Args {
     #[arg(short = 'l', long)]
     location: PathBuf,
 
-    /// Path to the output PNG file
-    #[arg(short, long)]
-    output: PathBuf,
+    /// Path to the output image file (e.g., output.png or output.jpg)
+    output: PathBuf, // Changed from #[arg(short, long)] to positional
 
     /// Maximum width/height of the image in pixels (will use smaller of width/height)
     #[arg(short, long, default_value_t = 12000)]
@@ -63,6 +64,14 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Determine output format from file extension
+    let output_format = match args.output.extension().and_then(OsStr::to_str) {
+        Some("png") => ImageFormat::Png,
+        Some("jpg") | Some("jpeg") => ImageFormat::Jpeg,
+        Some(ext) => bail!("Unsupported output format: {}. Please use .png or .jpg.", ext),
+        None => bail!("Output file must have a .png or .jpg extension."),
+    };
 
     // Read and parse the graph file
     let mut graph_file = File::open(&args.graph)
@@ -108,13 +117,13 @@ fn main() -> Result<()> {
     // Generate the PNG visualization using the library function
     let image = visualize_graph(&graph, &location, &config)
         .map_err(|e| anyhow::Error::new(e)) // Convert library error to anyhow::Error
-        .with_context(|| "Failed to generate PNG visualization")?;
+        .with_context(|| "Failed to generate visualization")?;
 
-    // Save the image
-    image.save(&args.output)
-        .with_context(|| format!("Failed to save PNG to {:?}", args.output))?;
+    // Save the image with the determined format
+    image.save_with_format(&args.output, output_format)
+        .with_context(|| format!("Failed to save image to {:?}", args.output))?;
 
-    println!("PNG visualization saved to {:?}", args.output);
+    println!("Image visualization saved to {:?}", args.output);
 
     Ok(())
 }

@@ -1,0 +1,19 @@
+[package]
+name = "tilebuild"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+flatbuffers = "25.2.10"
+structopt = "0.3.26"
+s2 = "*"
+schema = { path = "../schema" }
+graphviz = { path = "../graphviz" }
+
+[lib]
+name = "tilebuild"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tilebuild"
+path = "src/main.rs"
