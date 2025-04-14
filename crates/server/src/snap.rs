@@ -11,6 +11,9 @@ use tobmapapi::snap_service_server::{SnapService, SnapServiceServer};
 use tobmapapi::{SnapRequest, SnapResponse, SnapResponseDebugInfo};
 use schema::snap_generated::tobmapsnap::{SnapBuckets, SnapBucket};
 
+// Export the tobmapgraph module so it can be used by route.rs
+pub use crate::schema::graph_generated::tobmapgraph;
+
 pub mod tobmapapi {
     tonic::include_proto!("tobmapapi");
 }

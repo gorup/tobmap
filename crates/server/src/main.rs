@@ -4,8 +4,8 @@ mod route;
 use clap::Parser;
 use route::MyRouteService;
 use snap::MySnapService;
-use snap::tobmapapi::snap_service_server::{SnapService, SnapServiceServer};
-use route::tobmaprouteapi::route_service_server::{RouteService, RouteServiceServer};
+use snap::tobmapapi::snap_service_server::SnapServiceServer;
+use route::tobmaprouteapi::route_service_server::RouteServiceServer;
 use tonic::transport::Server;
 use std::path::PathBuf;
 
@@ -15,6 +15,10 @@ struct Args {
     /// Directory containing snapbucket files
     #[clap(short, long)]
     snapbuckets_dir: PathBuf,
+
+    /// Path to the graph blob file
+    #[clap(long)]
+    graph_path: PathBuf,
 
     /// Outer cell level for S2 cells
     #[clap(short, long, default_value = "4")]
@@ -37,7 +41,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let addr = args.address.parse()?;
 
-    let route_service = MyRouteService::default();
+    // Initialize route service with graph data
+    let route_service = match MyRouteService::new(&args.graph_path) {
+        Ok(service) => service,
+        Err(e) => {
+            eprintln!("Failed to load graph data: {}", e);
+            MyRouteService::default()
+        }
+    };
 
     let snap_service = MySnapService::new(
         args.snapbuckets_dir.clone(),
@@ -47,6 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Starting server on {}", args.address);
     println!("Using snapbuckets directory: {:?}", args.snapbuckets_dir);
+    println!("Using graph data from: {:?}", args.graph_path);
     println!("Outer cell level: {}, Inner cell level: {}", args.outer_cell_level, args.inner_cell_level);
 
     Server::builder()
