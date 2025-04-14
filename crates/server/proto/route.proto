@@ -11,6 +11,11 @@ message RouteRequest {
   uint32 end_edge_idx = 2;
 }
 
-message RouteResponse {
+message Path {
   repeated uint32 edges = 1;
+  repeated uint32 nodes = 2;
+}
+
+message RouteResponse {
+  repeated Path paths = 1;
 }

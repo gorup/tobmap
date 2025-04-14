@@ -18,11 +18,10 @@ impl RouteService for MyRouteService {
     ) -> Result<Response<RouteResponse>, Status> { // Return an instance of type HelloReply
         println!("Got a request: {:?}", request);
 
-
         let req = request.into_inner();
 
         let reply = RouteResponse {
-            edges: vec![],
+            paths: vec![],
         };
 
         Ok(Response::new(reply)) // Send back our formatted greeting
