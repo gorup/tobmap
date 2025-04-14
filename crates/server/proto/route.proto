@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package tobmapapi;
+package tobmaprouteapi;
 
 service RouteService {
     rpc Route(RouteRequest) returns (RouteResponse) {}

@@ -1,8 +1,11 @@
 mod snap;
+mod route;
 
 use clap::Parser;
+use route::MyRouteService;
 use snap::MySnapService;
 use snap::tobmapapi::snap_service_server::{SnapService, SnapServiceServer};
+use route::tobmaprouteapi::route_service_server::{RouteService, RouteServiceServer};
 use tonic::transport::Server;
 use std::path::PathBuf;
 
@@ -33,6 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::new().filter_level(log::LevelFilter::Debug).init();
     
     let addr = args.address.parse()?;
+
+    let route_service = MyRouteService::default();
+
     let snap_service = MySnapService::new(
         args.snapbuckets_dir.clone(),
         args.outer_cell_level,
@@ -44,8 +50,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Outer cell level: {}, Inner cell level: {}", args.outer_cell_level, args.inner_cell_level);
 
     Server::builder()
-        .add_service(SnapServiceServer::new(snap_service))
-        .serve(addr)
+    .add_service(SnapServiceServer::new(snap_service))
+    .add_service(RouteServiceServer::new(route_service))
+    .serve(addr)
         .await?;
 
     Ok(())
