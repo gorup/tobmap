@@ -337,11 +337,11 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         min_lat = full_max_lat - (tile.row_index + 1) as f64 * tile_height - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
 
         // Calculate tile image dimensions (including overlap)
-        let tile_img_width = full_img_width / tile.columns + 
+        let tile_img_width = full_img_width + 
             (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
             (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
         
-        let tile_img_height = full_img_height / tile.rows + 
+        let tile_img_height = full_img_height + 
             (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
             (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
             
@@ -404,7 +404,7 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         // Calculate overall edge properties (color based on total distance/time)
         let costs_and_flags = edge.costs_and_flags();
         let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
-        let time_seconds: u16 = (costs_and_flags >> 2) as u16;
+        let time_seconds: u16 = (costs_and_flags >> 3) as u16;
         let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
 
         // Determine edge color and width

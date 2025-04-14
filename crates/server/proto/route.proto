@@ -6,20 +6,11 @@ service RouteService {
     rpc Route(RouteRequest) returns (RouteResponse) {}
 }
 
-message LatLng {
-    double lat = 1;
-    double lng = 2;
-}
-
 message RouteRequest {
-  LatLng start = 1;
-  LatLng end = 2;
-}
-
-message Png {
-    bytes bytes = 1;
+  uint32 start_edge_idx = 1;
+  uint32 end_edge_idx = 2;
 }
 
 message RouteResponse {
-    Png png = 1;
+  repeated uint32 edges = 1;
 }

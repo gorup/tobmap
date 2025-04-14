@@ -25,9 +25,7 @@ struct Edge {
   point_2_node_idx:uint32;
 
   // from left, bits
-  // - 0,1,2,3 are drive cost (0-16)
-  // - 4,5,6 are reserved
-  // - 7 is 'backwards_allowed'
+  // - 13 for cost
   costs_and_flags:uint16;
 }
 
@@ -45,10 +43,9 @@ table EdgeLocationItems {
 
 table NodeLocationItems {
   cell_id:uint64; // The cell id of the node
-
-  // Future: repeated street names, 
 }
 
+// Used for snapping and for the line
 table LocationBlob {
   // Parallel w/ GraphBlob edges
   edge_location_items:[EdgeLocationItems];
@@ -56,6 +53,7 @@ table LocationBlob {
   node_location_items:[NodeLocationItems];
 }
 
+// Used for route description
 //table DescriptionBlob {
   // Parallel w/ GraphBlob edges
 //  edge_descriptions:[EdgeDescriptionThings];

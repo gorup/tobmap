@@ -485,16 +485,16 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
             // Calculate travel time in seconds
             let time_seconds: f32 = travel_costs[0];
             
-            // Cap the travel time between 1 and 16384 seconds
-            let capped_time = time_seconds.max(1.0).min(16384.0) as u16;
+            // Cap the travel time between 1 and 8192 seconds
+            let capped_time = time_seconds.max(1.0).min(8192.0) as u16;
             
             capped_time
         } else {
-            16384 // Not allowed or extremely slow (max value)
+            8192 // Not allowed or extremely slow (max value)
         };
         
-        // Set the costs_and_flags: bits 0-13 for cost in seconds, bit 15 for backwards_allowed
-        let costs_and_flags: u16 = drive_cost << 2 | (if *backwards_allowed { 0b0000_0000_0000_0001 } else { 0 });
+        // Set the costs_and_flags: bits 0-12 for cost in seconds, bit 15 for backwards_allowed
+        let costs_and_flags: u16 = drive_cost << 3 | (if *backwards_allowed { 0b0000_0000_0000_0001 } else { 0 });
         
         // Create edge directly as a struct 
         let edge = Edge::new(

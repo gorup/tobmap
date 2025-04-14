@@ -9,6 +9,8 @@ structopt = "0.3.26"
 s2 = "*"
 schema = { path = "../schema" }
 graphviz = { path = "../graphviz" }
+clap = { version = "4.0", features = ["derive"] }
+anyhow = "1.0"
 
 [lib]
 name = "tilebuild"
