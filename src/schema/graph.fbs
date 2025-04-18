@@ -1,0 +1,76 @@
+// Graph schema for OpenStreetMap data representation using FlatBuffers
+namespace tobmap;
+
+// Travel modes for edge costs
+enum TravelMode : byte {
+  Car = 0,
+  Bike = 1,
+  Walk = 2,
+  Transit = 3
+}
+
+// A node represents a real-world intersection
+table Node {
+  // Unique identifier for the node
+  id:string;
+  
+  // S2 cell identifier at a specific level
+  s2_cell_id:uint64;
+  
+  // Latitude and longitude
+  lat:float;
+  lng:float;
+}
+
+// An edge represents a way (street, path, etc.) between two nodes
+table Edge {
+  // Unique identifier for the edge
+  id:string;
+  
+  // Source and destination node identifiers
+  source_node_id:string;
+  destination_node_id:string;
+  
+  // Name of the way, if available
+  name:string;
+  
+  // Way identifier from OpenStreetMap
+  osm_way_id:uint64;
+  
+  // Travel costs (time in seconds) for different travel modes
+  // A negative value indicates that this mode is not allowed
+  travel_costs:[float];
+  
+  // The geometry of the edge as a series of lat/lng points
+  geometry_lats:[float];
+  geometry_lngs:[float];
+  
+  // Tags from OpenStreetMap that might be useful
+  tags:[KeyValue];
+}
+
+// Simple key-value pair for OSM tags
+table KeyValue {
+  key:string;
+  value:string;
+}
+
+// A cell contains all nodes and edges within a specific S2 cell
+table Cell {
+  s2_cell_id:uint64;
+  nodes:[Node];
+  edges:[Edge];
+}
+
+// The root object containing all the map data organized by S2 cells
+table MapData {
+  // Metadata
+  version:string;
+  osm_data_date:string;
+  generation_date:string;
+  
+  // All cells in the map
+  cells:[Cell];
+}
+
+root_type MapData; 
