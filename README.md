@@ -8,7 +8,7 @@ tobmap
 - Now another 2-3hrs
 
 ```
-cargo run --release --bin graphbuild ../Downloads/washington-latest.osm.pbf outputs/walatest.graph.pb
+cargo run --release --bin graphbuild -- ~/Downloads/washington-latest.osm.pbf outputs/walatest_graph.fb outputs/walatest_location.fb outputs/walatest_description.fb
 ```
 
 ```

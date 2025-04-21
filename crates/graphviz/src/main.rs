@@ -5,8 +5,8 @@ use std::ffi::OsStr;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use image::ImageFormat; // Import ImageFormat
-use schema::tobmapgraph::{GraphBlob, LocationBlob};
+use image::ImageFormat;
+use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
 
 // Import from the library crate
 use graphviz::{visualize_graph, VizConfig};
@@ -21,6 +21,10 @@ struct Args {
     /// Path to the input location.fbs file
     #[arg(short = 'l', long)]
     location: PathBuf,
+
+    /// Path to the optional description.fbs file (for road priorities)
+    #[arg(short = 'd', long)]
+    description: PathBuf,
 
     /// Path to the output image file (e.g., output.png or output.jpg)
     output: PathBuf, // Changed from #[arg(short, long)] to positional
@@ -89,6 +93,15 @@ fn main() -> Result<()> {
     location_file.read_to_end(&mut location_buffer)
         .with_context(|| "Failed to read location file")?;
 
+    // Read and parse the location file
+    let mut description_file = File::open(&args.description)
+        .with_context(|| format!("Failed to open description file: {:?}", args.description))?;
+
+    let mut description_buffer = Vec::new();
+    description_file.read_to_end(&mut description_buffer)
+        .with_context(|| "Failed to read description file")?;
+
+
     // Use get_root_with_opts instead of root for better error handling and custom verifier options
     let verifier_opts = flatbuffers::VerifierOptions {
         max_tables: 3_000_000_000, // 3 billion tables
@@ -101,6 +114,9 @@ fn main() -> Result<()> {
     let location = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_buffer)
         .with_context(|| "Failed to parse location data from buffer")?;
 
+    let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
+        .with_context(|| "Failed to parse description data from buffer")?;
+
     // Create VizConfig from Args
     let config = VizConfig {
         max_size: args.max_size,
@@ -112,6 +128,8 @@ fn main() -> Result<()> {
         zoom_meters: args.zoom_meters,
         highlight_edge_index: args.highlight_edge_index,
         highlight_edge_width: args.highlight_edge_width,
+        tile: None, // Not using tiling in this example
+        description: &description, // Pass the optional description data
     };
 
     // Generate the PNG visualization using the library function

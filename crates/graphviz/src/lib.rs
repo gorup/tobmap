@@ -5,7 +5,7 @@ use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_line_segment_mut, draw_cross_mut, draw_filled_circle_mut};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
-use schema::tobmapgraph::{GraphBlob, LocationBlob};
+use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -34,7 +34,7 @@ pub struct TileConfig {
 
 /// Configuration for the visualization process.
 #[derive(Debug, Clone)]
-pub struct VizConfig {
+pub struct VizConfig<'a> {
     pub max_size: u32,
     pub node_size: u32,
     pub edge_width: f32,
@@ -45,6 +45,7 @@ pub struct VizConfig {
     pub highlight_edge_index: Option<u32>,
     pub highlight_edge_width: Option<f32>,
     pub tile: Option<TileConfig>, // New field for tiling configuration
+    pub description: &'a DescriptionBlob<'a>, // Add reference to description blob
 }
 
 /// Converts S2 CellID to lat/lng
@@ -230,6 +231,9 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
     let edge_locations = location.edge_location_items().ok_or_else(||
         GraphVizError::ParseError("Failed to get edge locations".to_string()))?;
 
+    // Get edge descriptions if available
+    let edge_descriptions = config.description.edge_descriptions();
+
     // Verify we have the same number of nodes and node locations
     if nodes.len() != node_locations.len() {
         return Err(GraphVizError::ParseError(format!(
@@ -406,14 +410,40 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
         let time_seconds: u16 = (costs_and_flags >> 3) as u16;
         let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
+        // Get edge priority from description if available
+        let mut priority_multiplier = 1.0;
+        if let Some(descriptions) = edge_descriptions {
+            if i < descriptions.len() {
+            let desc = descriptions.get(i);
+            let priority = desc.priority();
+
+            // Classify priority into one of 4 width categories
+            priority_multiplier = match priority {
+                0..=4 => 1.0,  // Lowest priority
+                5..=6 => 2.0,  // Medium-low priority
+                7..=8 => 3.0,  // Medium-high priority
+                _ => 5.0,      // Highest priority
+            };
+
+            // Log street names if this is the highlighted edge
+            if is_highlighted_edge {
+                if let Some(street_names) = desc.street_names() {
+                println!("    Street Names:");
+                for j in 0..street_names.len() {
+                    println!("      [{}]: {}", j, street_names.get(j));
+                }
+                }
+            }
+            }
+        }
 
         // Determine edge color and width
         let mut current_edge_color = get_speed_color(distance_meters, time_seconds);
-        let mut current_edge_width = config.edge_width;
+        let mut current_edge_width = config.edge_width * priority_multiplier;
 
         if is_highlighted_edge {
             current_edge_color = yellow;
-            current_edge_width = config.highlight_edge_width.unwrap_or(config.edge_width * 2.0); // Use specified width or double the default
+            current_edge_width = config.highlight_edge_width.unwrap_or(config.edge_width * 2.0 * priority_multiplier); // Use specified width or double the default
         }
 
         // Construct the full path for the edge
@@ -442,6 +472,12 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
             println!("    Costs and Flags Raw: {:#018b} ({})", costs_and_flags, costs_and_flags);
             println!("    Backwards Allowed: {}", backwards_allowed);
             println!("    Time (seconds): {}", time_seconds);
+            if let Some(descriptions) = edge_descriptions {
+                if i < descriptions.len() {
+                    println!("    Priority: {}", descriptions.get(i).priority());
+                    println!("    Priority Multiplier: {:.2}", priority_multiplier);
+                }
+            }
             println!("  Location Data:");
             println!("    Start Node Lat/Lng: ({}, {})", lat1, lng1);
             println!("    End Node Lat/Lng: ({}, {})", lat2, lng2);

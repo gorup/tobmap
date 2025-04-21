@@ -766,8 +766,8 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>
     let mut edge_descriptions = Vec::with_capacity(edge_node_pairs.len());
     
     for (street_names, priority) in &edge_description_data {
-        if !street_names.is_empty() {
-            // Create street names vector
+        // Create street names vector if available
+        let street_names_vector = if !street_names.is_empty() {
             let street_name_refs: Vec<&str> = street_names.iter().map(|s| s.as_str()).collect();
             let street_names_offsets: Vec<flatbuffers::WIPOffset<&str>> = 
                 street_name_refs.iter().map(|&s| description_builder.create_string(s)).collect();
@@ -776,29 +776,27 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>
             for i in (0..street_names_offsets.len()).rev() {
                 description_builder.push(street_names_offsets[i]);
             }
-            let street_names_vector = description_builder.end_vector(street_names_offsets.len());
-            
-            let edge_desc_args = EdgeDescriptionThingsArgs {
-                street_names: Some(street_names_vector),
-                priority: *priority,
-            };
-            
-            let edge_desc = EdgeDescriptionThings::create(&mut description_builder, &edge_desc_args);
-            edge_descriptions.push(Some(edge_desc));
+            Some(description_builder.end_vector(street_names_offsets.len()))
         } else {
-            edge_descriptions.push(None);
-        }
+            None
+        };
+        
+        // Always create an edge description with priority, even if no street names
+        let edge_desc_args = EdgeDescriptionThingsArgs {
+            street_names: street_names_vector,
+            priority: *priority,
+        };
+        
+        let edge_desc = EdgeDescriptionThings::create(&mut description_builder, &edge_desc_args);
+        edge_descriptions.push(edge_desc);
     }
     
-    // Create vector of edge description items (filtering out None values)
-    let valid_descriptions: Vec<flatbuffers::WIPOffset<EdgeDescriptionThings>> = 
-        edge_descriptions.into_iter().filter_map(|d| d).collect();
-    
-    let _vector_start = description_builder.start_vector::<flatbuffers::ForwardsUOffset<EdgeDescriptionThings>>(valid_descriptions.len());
-    for i in (0..valid_descriptions.len()).rev() {
-        description_builder.push(valid_descriptions[i]);
+    // Create vector of edge description items (all edges should have descriptions now)
+    let _vector_start = description_builder.start_vector::<flatbuffers::ForwardsUOffset<EdgeDescriptionThings>>(edge_descriptions.len());
+    for i in (0..edge_descriptions.len()).rev() {
+        description_builder.push(edge_descriptions[i]);
     }
-    let edge_description_items_offset = description_builder.end_vector(valid_descriptions.len());
+    let edge_description_items_offset = description_builder.end_vector(edge_descriptions.len());
     
     // Create description blob arguments
     let description_blob_args = DescriptionBlobArgs {
