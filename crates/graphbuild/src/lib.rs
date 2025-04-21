@@ -8,7 +8,7 @@ use osmpbfreader::{Node, OsmId, OsmObj, OsmPbfReader, Way};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
 use schema::tobmapgraph::{Edge, GraphBlob, GraphBlobArgs, Interactions, Node as GraphNode, NodeArgs, RoadInteraction, 
-    LocationBlob, LocationBlobArgs, EdgeLocationItems, EdgeLocationItemsArgs, NodeLocationItems, NodeLocationItemsArgs};
+    LocationBlob, LocationBlobArgs, EdgeLocationItems, EdgeLocationItemsArgs, NodeLocationItems, NodeLocationItemsArgs, DescriptionBlob, DescriptionBlobArgs, EdgeDescriptionThings, EdgeDescriptionThingsArgs};
 use thiserror::Error;
 use log::{info, warn};
 use rayon::prelude::*;
@@ -57,23 +57,25 @@ struct Intersection {
 struct RoadSegment {
     id: i64,
     nodes: Vec<i64>,
-    points: Vec<LatLng>, // Added: Store LatLng points for the segment
+    points: Vec<LatLng>, // Store LatLng points for the segment
     speed_model: SpeedModel,
     is_oneway: bool,
     interactions: HashMap<i64, RoadInteraction>,
+    street_names: Vec<String>, // English street names
+    priority: u8, // Road priority based on highway tag
 }
 
-/// Parses OSM PBF data and returns a GraphBlob and LocationBlob
+/// Parses OSM PBF data and returns a GraphBlob, LocationBlob and DescriptionBlob
 /// 
 /// The function processes the OpenStreetMap data to create a graph representation
-/// with nodes (intersections) and edges (road segments), along with their locations.
+/// with nodes (intersections) and edges (road segments), along with their locations and descriptions.
 ///
 /// # Arguments
 /// * `osm_data` - Slice of bytes containing OSM PBF data
 ///
 /// # Returns
-/// * `StatusOr<(Vec<u8>, Vec<u8>)>` - Result containing the serialized graph and location data or an error
-pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
+/// * `StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>)>` - Result containing the serialized graph, location and description data or an error
+pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>)> {
     let mut reader = OsmPbfReader::new(std::io::Cursor::new(osm_data));
 
     let mut last_time = Instant::now();
@@ -168,7 +170,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     
     info!("Found {} intersections", intersections.len());
     
-    // Build road segments with speed models and points
+    // Build road segments with speed models, points, and descriptions
     let mut road_segments: Vec<RoadSegment> = Vec::new();
     let mut oneway_count = 0;
     for (way_id, way) in &ways {
@@ -185,71 +187,100 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
         }
         
         // Default speeds based on road type
+        let mut priority: u8 = 0;
         if let Some(highway) = way.tags.get("highway") {
             match highway.as_str() {
                 "motorway" | "motorway_link" => {
                     speed_model.car = 100.0;
                     speed_model.bike = -1.0; // Not allowed
                     speed_model.walk = -1.0; // Not allowed
+                    priority = 10;
                 },
                 "trunk" | "trunk_link" => {
                     speed_model.car = 80.0;
                     speed_model.bike = -1.0;
                     speed_model.walk = -1.0;
+                    priority = 9;
                 },
                 "primary" | "primary_link" => {
                     speed_model.car = 60.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 8;
                 },
                 "secondary" | "secondary_link" => {
                     speed_model.car = 50.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 7;
                 },
                 "tertiary" | "tertiary_link" => {
                     speed_model.car = 40.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 6;
                 },
                 "residential" | "unclassified" => {
                     speed_model.car = 30.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 5;
                 },
                 "service" => {
                     speed_model.car = 20.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 4;
                 },
                 "living_street" => {
                     speed_model.car = 10.0;
                     speed_model.bike = 10.0;
                     speed_model.walk = 5.0;
+                    priority = 3;
                 },
                 "pedestrian" => {
                     speed_model.car = -1.0;
                     speed_model.bike = 5.0;
                     speed_model.walk = 5.0;
+                    priority = 2;
                 },
                 "cycleway" => {
                     speed_model.car = -1.0;
                     speed_model.bike = 20.0;
                     speed_model.walk = 5.0;
+                    priority = 2;
                 },
                 "footway" | "path" | "steps" => {
                     speed_model.car = -1.0;
                     speed_model.bike = 5.0;
                     speed_model.walk = 5.0;
+                    priority = 1;
                 },
                 _ => {
                     speed_model.car = 30.0;
                     speed_model.bike = 15.0;
                     speed_model.walk = 5.0;
+                    priority = 5;
                 },
             }
         }
         
+        // Get English street name
+        let mut street_names = Vec::new();
+        if let Some(name) = way.tags.get("name") {
+            street_names.push(name.clone());
+        } else if let Some(name_en) = way.tags.get("name:en") {
+            street_names.push(name_en.clone());
+        } else if let Some(ref_name) = way.tags.get("ref") {
+            street_names.push(ref_name.clone());
+        }
+
+        // Convert street_names to Vec<String>
+        let street_names: Vec<String> = street_names
+            .into_iter()
+            .map(|name| name.to_string())
+            .collect();
+
         // Override with maxspeed tag if present
         if let Some(maxspeed) = way.tags.get("maxspeed") {
             if let Ok(speed) = maxspeed.parse::<f64>() {
@@ -298,6 +329,8 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
             speed_model,
             is_oneway,
             interactions,
+            street_names,
+            priority,
         });
     }
     
@@ -450,24 +483,69 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     let one_way_count = edge_map.values().filter(|(_, _, allows_fwd, allows_bwd, _, _, _)| *allows_fwd != *allows_bwd).count();
     info!("Found {} one-way road segments out of {} total segments", one_way_count, total_edge_count);
 
-    // Convert edge map to edge_node_pairs, now including points
-    let mut edge_node_pairs: Vec<(u32, u32, u64, Vec<f32>, bool, RoadInteraction, RoadInteraction, Vec<LatLng>)> = Vec::with_capacity(edge_map.len());
+    // Pre-build a lookup table that maps node pairs to road segments
+    // This will avoid costly lookups inside the edge_node_pairs loop
+    info!("Building node pair to road segment lookup table...");
+    let mut node_pair_to_segment: HashMap<(i64, i64), Vec<&RoadSegment>> = HashMap::new();
+    for segment in &road_segments {
+        // Find all intersection nodes in this segment
+        let intersection_node_ids: Vec<i64> = segment.nodes.iter()
+            .filter(|&node_id| intersections.contains_key(node_id))
+            .cloned()
+            .collect();
+        
+        // Create entries for each node pair in this segment
+        for i in 0..intersection_node_ids.len() {
+            for j in i+1..intersection_node_ids.len() {
+                let start_id = intersection_node_ids[i];
+                let end_id = intersection_node_ids[j];
+                
+                // Store segment for both directions (canonical ordering)
+                let canonical_key = if start_id < end_id { (start_id, end_id) } else { (end_id, start_id) };
+                node_pair_to_segment
+                    .entry(canonical_key)
+                    .or_insert_with(Vec::new)
+                    .push(segment);
+            }
+        }
+    }
+    info!("Built lookup table with {} node pairs", node_pair_to_segment.len());
+
+    let mut edge_node_pairs: Vec<(u32, u32, u64, Vec<f32>, bool, RoadInteraction, RoadInteraction, Vec<LatLng>, Vec<String>, u8)> = Vec::with_capacity(edge_map.len());
     for ((start_idx, end_idx), (cell_id, travel_costs, allows_fwd, allows_bwd, start_interaction, end_interaction, points)) in edge_map {
+        // Find original road segments for this edge to extract description data
+        let orig_start_id = if let Some((id, _)) = intersections_vec.get(start_idx as usize) { **id } else { continue };
+        let orig_end_id = if let Some((id, _)) = intersections_vec.get(end_idx as usize) { **id } else { continue };
+        
+        // Use the lookup table instead of searching through all road segments
+        let canonical_key = if orig_start_id < orig_end_id { (orig_start_id, orig_end_id) } else { (orig_end_id, orig_start_id) };
+        let connecting_segments = node_pair_to_segment.get(&canonical_key).cloned().unwrap_or_else(Vec::new);
+        
+        // Default description values
+        let mut street_names = Vec::new();
+        let mut priority: u8 = 0;
+        
+        // If we have connecting segments, find the one with highest priority
+        if !connecting_segments.is_empty() {
+            if let Some(best_segment) = connecting_segments.iter().max_by_key(|segment| segment.priority) {
+                street_names = best_segment.street_names.clone();
+                priority = best_segment.priority;
+            }
+        }
+        
         // `backwards_allowed` means travel is possible from end_idx to start_idx (relative to the canonical key)
         let backwards_allowed = allows_bwd; 
-        // Note: The stored edge in flatbuffer always goes from start_idx to end_idx.
-        // The `backwards_allowed` flag indicates if the reverse direction is also permitted.
-        // Interactions might need adjustment based on which direction is being considered during pathfinding.
-        edge_node_pairs.push((start_idx, end_idx, cell_id, 
-                             travel_costs, backwards_allowed,
-                             start_interaction, end_interaction, points));
+        edge_node_pairs.push((
+            start_idx, end_idx, cell_id, travel_costs, backwards_allowed,
+            start_interaction, end_interaction, points, street_names, priority
+        ));
     }
 
     info!("Built {} deduplicated edge node pairs, will now sort edges by cell, took {:?}", edge_node_pairs.len(), last_time.elapsed());
     last_time = Instant::now();
     
     // Sort edges by cell ID for locality
-    edge_node_pairs.par_sort_by_key(|(_, _, cell_id, _, _, _, _, _)| CellID(*cell_id).to_token());
+    edge_node_pairs.par_sort_by_key(|(_, _, cell_id, _, _, _, _, _, _, _)| CellID(*cell_id).to_token());
  
     info!("Sorting done, will now create flatbuffer edges, took {:?}", last_time.elapsed());
     last_time = Instant::now();
@@ -477,7 +555,7 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     // Keep track of points associated with the final edge index
     let mut edge_index_to_points: Vec<Vec<LatLng>> = Vec::with_capacity(edge_node_pairs.len()); 
 
-    for (start_idx, end_idx, _cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction, points) in &edge_node_pairs {
+    for (start_idx, end_idx, _cell_id, travel_costs, backwards_allowed, start_interaction, end_interaction, points, _, _) in &edge_node_pairs {
         let drive_cost = if travel_costs[0] > 0.0 {
             let distance_meters: f32 = (points.first().unwrap()
                 .distance(points.last().unwrap()).rad() * 6371000.0) as f32;
@@ -674,7 +752,69 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>)> {
     
     let location_data = location_builder.finished_data().to_vec();
     
-    Ok((graph_data, location_data))
+    info!("Graph blob built, now building description blob...");
+    let mut description_builder = FlatBufferBuilder::new();
+    
+    // Create a map to associate edge indices with their description data
+    let mut edge_description_data: Vec<(Vec<String>, u8)> = Vec::with_capacity(edge_node_pairs.len());
+    
+    for (_, _, _, _, _, _, _, _, street_names, priority) in &edge_node_pairs {
+        edge_description_data.push((street_names.clone(), *priority));
+    }
+    
+    // Store edge descriptions (street names and priority) from the previously collected data
+    let mut edge_descriptions = Vec::with_capacity(edge_node_pairs.len());
+    
+    for (street_names, priority) in &edge_description_data {
+        if !street_names.is_empty() {
+            // Create street names vector
+            let street_name_refs: Vec<&str> = street_names.iter().map(|s| s.as_str()).collect();
+            let street_names_offsets: Vec<flatbuffers::WIPOffset<&str>> = 
+                street_name_refs.iter().map(|&s| description_builder.create_string(s)).collect();
+            
+            let _vector_start = description_builder.start_vector::<flatbuffers::ForwardsUOffset<&str>>(street_names_offsets.len());
+            for i in (0..street_names_offsets.len()).rev() {
+                description_builder.push(street_names_offsets[i]);
+            }
+            let street_names_vector = description_builder.end_vector(street_names_offsets.len());
+            
+            let edge_desc_args = EdgeDescriptionThingsArgs {
+                street_names: Some(street_names_vector),
+                priority: *priority,
+            };
+            
+            let edge_desc = EdgeDescriptionThings::create(&mut description_builder, &edge_desc_args);
+            edge_descriptions.push(Some(edge_desc));
+        } else {
+            edge_descriptions.push(None);
+        }
+    }
+    
+    // Create vector of edge description items (filtering out None values)
+    let valid_descriptions: Vec<flatbuffers::WIPOffset<EdgeDescriptionThings>> = 
+        edge_descriptions.into_iter().filter_map(|d| d).collect();
+    
+    let _vector_start = description_builder.start_vector::<flatbuffers::ForwardsUOffset<EdgeDescriptionThings>>(valid_descriptions.len());
+    for i in (0..valid_descriptions.len()).rev() {
+        description_builder.push(valid_descriptions[i]);
+    }
+    let edge_description_items_offset = description_builder.end_vector(valid_descriptions.len());
+    
+    // Create description blob arguments
+    let description_blob_args = DescriptionBlobArgs {
+        edge_descriptions: Some(edge_description_items_offset),
+    };
+    
+    // Build final description blob
+    let description_blob = DescriptionBlob::create(&mut description_builder, &description_blob_args);
+    
+    description_builder.finish(description_blob, None);
+    
+    info!("Description blob building complete!");
+    
+    let description_data = description_builder.finished_data().to_vec();
+    
+    Ok((graph_data, location_data, description_data))
 }
 
 /// Converts the serialized buffer to a GraphBlob reference
@@ -697,6 +837,17 @@ pub fn get_graph_blob(buffer: &[u8]) -> schema::tobmapgraph::GraphBlob {
 /// * `LocationBlob` - Reference to the location data in the buffer
 pub fn get_location_blob(buffer: &[u8]) -> schema::tobmapgraph::LocationBlob {
     flatbuffers::root::<schema::tobmapgraph::LocationBlob>(buffer).unwrap()
+}
+
+/// Converts the serialized buffer to a DescriptionBlob reference
+/// 
+/// # Arguments
+/// * `buffer` - Serialized flatbuffer data for description
+///
+/// # Returns
+/// * `DescriptionBlob` - Reference to the description data in the buffer
+pub fn get_description_blob(buffer: &[u8]) -> schema::tobmapgraph::DescriptionBlob {
+    flatbuffers::root::<schema::tobmapgraph::DescriptionBlob>(buffer).unwrap()
 }
 
 /// Takes two travel costs and returns the better (smaller but valid) cost

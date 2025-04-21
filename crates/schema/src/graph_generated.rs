@@ -952,5 +952,216 @@ impl core::fmt::Debug for LocationBlob<'_> {
       ds.finish()
   }
 }
+pub enum DescriptionBlobOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct DescriptionBlob<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for DescriptionBlob<'a> {
+  type Inner = DescriptionBlob<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> DescriptionBlob<'a> {
+  pub const VT_EDGE_DESCRIPTIONS: flatbuffers::VOffsetT = 4;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    DescriptionBlob { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args DescriptionBlobArgs<'args>
+  ) -> flatbuffers::WIPOffset<DescriptionBlob<'bldr>> {
+    let mut builder = DescriptionBlobBuilder::new(_fbb);
+    if let Some(x) = args.edge_descriptions { builder.add_edge_descriptions(x); }
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn edge_descriptions(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<EdgeDescriptionThings<'a>>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<EdgeDescriptionThings>>>>(DescriptionBlob::VT_EDGE_DESCRIPTIONS, None)}
+  }
+}
+
+impl flatbuffers::Verifiable for DescriptionBlob<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<EdgeDescriptionThings>>>>("edge_descriptions", Self::VT_EDGE_DESCRIPTIONS, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct DescriptionBlobArgs<'a> {
+    pub edge_descriptions: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<EdgeDescriptionThings<'a>>>>>,
+}
+impl<'a> Default for DescriptionBlobArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    DescriptionBlobArgs {
+      edge_descriptions: None,
+    }
+  }
+}
+
+pub struct DescriptionBlobBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> DescriptionBlobBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_edge_descriptions(&mut self, edge_descriptions: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<EdgeDescriptionThings<'b >>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(DescriptionBlob::VT_EDGE_DESCRIPTIONS, edge_descriptions);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> DescriptionBlobBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    DescriptionBlobBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<DescriptionBlob<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for DescriptionBlob<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("DescriptionBlob");
+      ds.field("edge_descriptions", &self.edge_descriptions());
+      ds.finish()
+  }
+}
+pub enum EdgeDescriptionThingsOffset {}
+#[derive(Copy, Clone, PartialEq)]
+
+pub struct EdgeDescriptionThings<'a> {
+  pub _tab: flatbuffers::Table<'a>,
+}
+
+impl<'a> flatbuffers::Follow<'a> for EdgeDescriptionThings<'a> {
+  type Inner = EdgeDescriptionThings<'a>;
+  #[inline]
+  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+    Self { _tab: flatbuffers::Table::new(buf, loc) }
+  }
+}
+
+impl<'a> EdgeDescriptionThings<'a> {
+  pub const VT_STREET_NAMES: flatbuffers::VOffsetT = 4;
+  pub const VT_PRIORITY: flatbuffers::VOffsetT = 6;
+
+  #[inline]
+  pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
+    EdgeDescriptionThings { _tab: table }
+  }
+  #[allow(unused_mut)]
+  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: flatbuffers::Allocator + 'bldr>(
+    _fbb: &'mut_bldr mut flatbuffers::FlatBufferBuilder<'bldr, A>,
+    args: &'args EdgeDescriptionThingsArgs<'args>
+  ) -> flatbuffers::WIPOffset<EdgeDescriptionThings<'bldr>> {
+    let mut builder = EdgeDescriptionThingsBuilder::new(_fbb);
+    if let Some(x) = args.street_names { builder.add_street_names(x); }
+    builder.add_priority(args.priority);
+    builder.finish()
+  }
+
+
+  #[inline]
+  pub fn street_names(&self) -> Option<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>> {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>(EdgeDescriptionThings::VT_STREET_NAMES, None)}
+  }
+  #[inline]
+  pub fn priority(&self) -> u8 {
+    // Safety:
+    // Created from valid Table for this object
+    // which contains a valid value in this slot
+    unsafe { self._tab.get::<u8>(EdgeDescriptionThings::VT_PRIORITY, Some(0)).unwrap()}
+  }
+}
+
+impl flatbuffers::Verifiable for EdgeDescriptionThings<'_> {
+  #[inline]
+  fn run_verifier(
+    v: &mut flatbuffers::Verifier, pos: usize
+  ) -> Result<(), flatbuffers::InvalidFlatbuffer> {
+    use self::flatbuffers::Verifiable;
+    v.visit_table(pos)?
+     .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<&'_ str>>>>("street_names", Self::VT_STREET_NAMES, false)?
+     .visit_field::<u8>("priority", Self::VT_PRIORITY, false)?
+     .finish();
+    Ok(())
+  }
+}
+pub struct EdgeDescriptionThingsArgs<'a> {
+    pub street_names: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, flatbuffers::ForwardsUOffset<&'a str>>>>,
+    pub priority: u8,
+}
+impl<'a> Default for EdgeDescriptionThingsArgs<'a> {
+  #[inline]
+  fn default() -> Self {
+    EdgeDescriptionThingsArgs {
+      street_names: None,
+      priority: 0,
+    }
+  }
+}
+
+pub struct EdgeDescriptionThingsBuilder<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> {
+  fbb_: &'b mut flatbuffers::FlatBufferBuilder<'a, A>,
+  start_: flatbuffers::WIPOffset<flatbuffers::TableUnfinishedWIPOffset>,
+}
+impl<'a: 'b, 'b, A: flatbuffers::Allocator + 'a> EdgeDescriptionThingsBuilder<'a, 'b, A> {
+  #[inline]
+  pub fn add_street_names(&mut self, street_names: flatbuffers::WIPOffset<flatbuffers::Vector<'b , flatbuffers::ForwardsUOffset<&'b  str>>>) {
+    self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(EdgeDescriptionThings::VT_STREET_NAMES, street_names);
+  }
+  #[inline]
+  pub fn add_priority(&mut self, priority: u8) {
+    self.fbb_.push_slot::<u8>(EdgeDescriptionThings::VT_PRIORITY, priority, 0);
+  }
+  #[inline]
+  pub fn new(_fbb: &'b mut flatbuffers::FlatBufferBuilder<'a, A>) -> EdgeDescriptionThingsBuilder<'a, 'b, A> {
+    let start = _fbb.start_table();
+    EdgeDescriptionThingsBuilder {
+      fbb_: _fbb,
+      start_: start,
+    }
+  }
+  #[inline]
+  pub fn finish(self) -> flatbuffers::WIPOffset<EdgeDescriptionThings<'a>> {
+    let o = self.fbb_.end_table(self.start_);
+    flatbuffers::WIPOffset::new(o.value())
+  }
+}
+
+impl core::fmt::Debug for EdgeDescriptionThings<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    let mut ds = f.debug_struct("EdgeDescriptionThings");
+      ds.field("street_names", &self.street_names());
+      ds.field("priority", &self.priority());
+      ds.finish()
+  }
+}
 }  // pub mod tobmapgraph
 

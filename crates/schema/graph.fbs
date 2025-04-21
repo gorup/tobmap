@@ -47,19 +47,21 @@ table NodeLocationItems {
 
 // Used for snapping and for the line
 table LocationBlob {
-  // Parallel w/ GraphBlob edges
+  // Parallel w/ GraphBlob edges if the blob is 1:1 wih the entire graph,
+  // but if you split things up by S2 cell then no longer parallel
   edge_location_items:[EdgeLocationItems];
   // Parallel w/ GraphBlob nodes
   node_location_items:[NodeLocationItems];
 }
 
 // Used for route description
-//table DescriptionBlob {
+table DescriptionBlob {
   // Parallel w/ GraphBlob edges
-//  edge_descriptions:[EdgeDescriptionThings];
-//}
+ edge_descriptions:[EdgeDescriptionThings];
+}
 
-// 
-//table EdgeDescriptionThings {
-//  street_names:[string];
-//}
+
+table EdgeDescriptionThings {
+ street_names:[string]; // english
+ priority:uint8;
+}
