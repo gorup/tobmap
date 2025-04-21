@@ -1,6 +1,19 @@
 [package]
 name = "tilebuildraw"
-version = "0.0.0"
-edition = "2024"
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
+flatbuffers = "25.2.10"
+s2 = "0.0.13"
+rayon = "1.8"
+anyhow = "1.0"
+log = "0.4"
+tempfile = "3.19"
+prost = "0.11"
+prost-types = "0.13"
+clap = { version = "4.3", features = ["derive"] }
+schema = { path = "../schema" }
+
+[build-dependencies]
+prost-build = "0.11"

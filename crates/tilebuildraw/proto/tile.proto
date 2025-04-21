@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package tobmapdata;
+
+message S2CellData {
+  uint64 cell_id = 1;
+  
+  repeated Vertex vertices = 2;
+  repeated Edge edges = 3;
+}
+
+message Vertex {
+  uint64 cell_id = 1;
+
+  // more in the future
+}
+
+message Edge {
+  // At least two! Cell ids, as specific as possible
+  repeated uint64 points = 1;
+  uint32 priority = 2; // between 0 and 10, 
+  repeated string street_names = 3; // street names
+  bool is_oneway = 4; // true if one way
+}
