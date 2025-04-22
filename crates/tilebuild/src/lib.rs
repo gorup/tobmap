@@ -1,173 +1,142 @@
 use anyhow::{Result, Context};
 use schema::tobmapgraph::{GraphBlob, LocationBlob};
-use graphviz::{visualize_graph, VizConfig, TileConfig, process_world_data, render_tile, WorldData};
+use graphviz::{VizConfig, TileConfig, process_world_data, render_tile, WorldData};
 use std::path::{Path, PathBuf};
 use std::fs;
+use std::sync::Arc;
+use image::ImageFormat;
 use rayon::prelude::*;
 
-/// Configuration for tile building process
-#[derive(Clone, Debug)]
-pub struct TileBuildConfig<'a> {
-    pub output_dir: PathBuf,        // Directory where tiles will be saved
-    pub max_zoom_level: u32,        // Maximum zoom level (0-based)
-    pub tile_size: u32,             // Target size for tiles (longest edge)
-    pub tile_overlap: u32,          // Overlap between tiles in pixels
-    pub viz_config: VizConfig<'a>,      // Base visualization config
+/// Configuration for tile generation
+#[derive(Debug, Clone)]
+pub struct TileBuildConfig {
+    // Output directory for tiles
+    pub output_dir: PathBuf,
+    
+    // Maximum zoom level (0-based)
+    pub max_zoom_level: u32,
+    
+    // Tile size in pixels (longest edge)
+    pub tile_size: u32,
+    
+    // Overlap between tiles in pixels
+    pub tile_overlap: u32,
+    
+    // Show vertices for each zoom level
+    pub show_vertices: Vec<bool>,
+    
+    // Minimum priority to render for each zoom level
+    pub min_priority: Vec<usize>,
+    
+    // Base visualization configuration
+    pub viz_config: VizConfig<'static>,
 }
 
-impl Default for TileBuildConfig<'_> {
-    fn default() -> Self {
-        Self {
-            output_dir: PathBuf::from("tiles"),
-            max_zoom_level: 3,     // 4 levels (0-3)
-            tile_size: 2048,       // 2048 pixels on longest edge
-            tile_overlap: 16,      // 16 pixel overlap between tiles
-            viz_config: VizConfig {
-                max_size: 2048,
-                node_size: 0,
-                edge_width: 0.0,
-                show_labels: false,
-                center_lat: None,
-                center_lng: None,
-                zoom_meters: None,
-                highlight_edge_index: None,
-                highlight_edge_width: None,
-                tile: None,
-                description: None,
-            },
-        }
-    }
+/// Tile builder
+pub struct TileBuilder {
+    config: TileBuildConfig,
 }
 
-pub struct TileBuilder<'a> {
-    config: TileBuildConfig<'a>,
-}
-
-impl<'a> TileBuilder<'a> {
-    pub fn new(config: TileBuildConfig<'a>) -> Self {
+impl TileBuilder {
+    /// Create a new tile builder with the given configuration
+    pub fn new(config: TileBuildConfig) -> Self {
         Self { config }
-    }
-    
-    /// Generate tile filename for a specific level, row, column
-    fn get_tile_filename(&self, level: u32, row: u32, col: u32) -> PathBuf {
-        let level_dir = format!("level_{}", level);
-        let filename = format!("tile_{}_{}_{}.jpg", level, row, col);
-        self.config.output_dir.join(level_dir).join(filename)
-    }
-    
-    /// Create directory structure for tiles
-    fn create_directories(&self) -> Result<()> {
-        for level in 0..=self.config.max_zoom_level {
-            let level_dir = self.config.output_dir.join(format!("level_{}", level));
-            fs::create_dir_all(&level_dir)
-                .with_context(|| format!("Failed to create directory: {:?}", level_dir))?;
-        }
-        Ok(())
     }
     
     /// Build all tiles for all zoom levels
     pub fn build_all_tiles(&self, graph: &GraphBlob, location: &LocationBlob) -> Result<()> {
-        // Create output directories
-        self.create_directories()?;
+        // Create output directory if it doesn't exist
+        fs::create_dir_all(&self.config.output_dir).context("Failed to create output directory")?;
         
-        // Process world data once - this is the performance improvement
-        println!("Pre-processing world data...");
-        let world_data = process_world_data(graph, location, None, self.config.viz_config.max_size)
-            .with_context(|| "Failed to process world data")?;
-        println!("World data processed: {} nodes, {} edges", world_data.nodes_count, world_data.edges_count);
+        // Process the world data once (heavy operation)
+        let world_data = Arc::new(process_world_data(graph, location, None, self.config.tile_size)
+            .context("Failed to process world data")?);
+            
+        println!("Processed world data with {} nodes and {} edges", 
+            world_data.nodes_count, world_data.edges_count);
         
-        // For each zoom level
-        for level in 0..=self.config.max_zoom_level {
-            self.build_level_tiles(level, &world_data)?;
+        // For each zoom level...
+        for zoom_level in 0..=self.config.max_zoom_level {
+            self.build_zoom_level(zoom_level, graph, location, Arc::clone(&world_data))
+                .with_context(|| format!("Failed to build zoom level {}", zoom_level))?;
         }
         
         Ok(())
     }
     
     /// Build all tiles for a specific zoom level
-    fn build_level_tiles(&self, level: u32, world: &WorldData) -> Result<()> {
-        // For each level, we have 3^level tiles per side
-        let tiles_per_side = 3u32.pow(level);
-        println!("Building level {} with {}x{} tiles in parallel...", level, tiles_per_side, tiles_per_side);
+    fn build_zoom_level(&self, zoom_level: u32, graph: &GraphBlob, location: &LocationBlob, 
+        world_data: Arc<WorldData>) -> Result<()> {
+        println!("Building zoom level {}...", zoom_level);
         
-        // Create a vector of all tile coordinates to process
-        let total_tiles = tiles_per_side * tiles_per_side;
-        let tile_coords: Vec<(u32, u32)> = (0..tiles_per_side)
-            .flat_map(|row| (0..tiles_per_side).map(move |col| (row, col)))
-            .collect();
+        // Create directory for this zoom level
+        let zoom_dir = self.config.output_dir.join(format!("{}", zoom_level));
+        fs::create_dir_all(&zoom_dir).context("Failed to create zoom level directory")?;
         
-        // Process tiles in parallel
-        let results: Vec<Result<()>> = tile_coords.par_iter()
-            .map(|&(row, col)| {
-                // We need to clone the config for each parallel task
-                let config_clone = self.config.clone();
-                let index = row * tiles_per_side + col + 1;
-                println!("  Generating tile {}/{}: level={}, row={}, col={}...", 
-                    index, total_tiles, level, row, col);
-                
-                // Configure tile settings
-                let mut viz_config = config_clone.viz_config.clone();
-                viz_config.tile = Some(TileConfig {
-                    rows: tiles_per_side,
-                    columns: tiles_per_side,
-                    row_index: row,
-                    column_index: col,
-                    overlap_pixels: config_clone.tile_overlap,
-                });
-                
-                // Render the tile using the pre-processed world data
-                let image = render_tile(world, &viz_config)
-                    .with_context(|| format!("Failed to render tile: level={}, row={}, col={}", level, row, col))?;
-                
-                // Save the image
-                let output_path = self.get_tile_filename(level, row, col);
-                image.save(&output_path)
-                    .with_context(|| format!("Failed to save tile to {:?}", output_path))?;
-                
-                Ok(())
-            })
-            .collect();
+        // Calculate number of tiles in each direction
+        // Double the number of tiles in each direction for each zoom level
+        let num_tiles = 2u32.pow(zoom_level);
         
-        // Check if any tile generation failed
-        for result in results {
-            result?;
-        }
+        // Get settings for this zoom level
+        let show_vertices = if zoom_level < self.config.show_vertices.len() as u32 {
+            self.config.show_vertices[zoom_level as usize]
+        } else {
+            true // Default to showing vertices if not specified
+        };
+        
+        let min_priority = if zoom_level < self.config.min_priority.len() as u32 {
+            self.config.min_priority[zoom_level as usize]
+        } else {
+            0 // Default to showing all priorities if not specified
+        };
+        
+        // Generate all tiles in parallel
+        (0..num_tiles * num_tiles).into_par_iter().try_for_each(|idx| {
+            let row = idx / num_tiles;
+            let col = idx % num_tiles;
+            
+            self.build_tile(zoom_level, row, col, num_tiles, graph, location, 
+                            Arc::clone(&world_data), show_vertices, min_priority)
+                .with_context(|| format!("Failed to build tile {}/{} at zoom level {}", row, col, zoom_level))
+        })?;
         
         Ok(())
     }
     
     /// Build a single tile
-    fn build_single_tile(
-        &self, 
-        level: u32,
-        row: u32, 
-        col: u32, 
-        tiles_per_side: u32,
-        world: &WorldData
-    ) -> Result<()> {
-        println!("  Generating tile {}/{}: level={}, row={}, col={}...", 
-            row * tiles_per_side + col + 1, 
-            tiles_per_side * tiles_per_side, 
-            level, row, col);
+    fn build_tile(&self, zoom_level: u32, row: u32, col: u32, num_tiles: u32,
+        graph: &GraphBlob, location: &LocationBlob, world_data: Arc<WorldData>,
+        show_vertices: bool, min_priority: usize) -> Result<()> {
         
-        // Configure tile settings
-        let mut viz_config = self.config.viz_config.clone();
-        viz_config.tile = Some(TileConfig {
-            rows: tiles_per_side,
-            columns: tiles_per_side,
+        // Configure tile for rendering
+        let tile_config = TileConfig {
+            rows: num_tiles,
+            columns: num_tiles,
             row_index: row,
             column_index: col,
             overlap_pixels: self.config.tile_overlap,
-        });
+        };
         
-        // Render the tile using the pre-processed world data
-        let image = render_tile(world, &viz_config)
-            .with_context(|| format!("Failed to render tile: level={}, row={}, col={}", level, row, col))?;
+        // Create a visualization config specific to this tile
+        let mut viz_config = self.config.viz_config.clone();
+        viz_config.tile = Some(tile_config);
+        viz_config.node_size = if show_vertices { 2 } else { 0 }; // Only draw nodes if enabled
+        viz_config.edge_width = 1.0; // Standard edge width
+        
+        // Create WorldData for this zoom level with priority filtering
+        // The filtering happens in the render_tile function
+        
+        // Render the tile
+        let image = render_tile(&world_data, &viz_config, min_priority)
+            .context("Failed to render tile")?;
         
         // Save the image
-        let output_path = self.get_tile_filename(level, row, col);
-        image.save(&output_path)
-            .with_context(|| format!("Failed to save tile to {:?}", output_path))?;
+        let output_path = self.config.output_dir
+            .join(format!("{}", zoom_level))
+            .join(format!("{}_{}.png", row, col));
+            
+        image.save_with_format(&output_path, image::ImageFormat::Png)
+            .with_context(|| format!("Failed to save tile image to {:?}", output_path))?;
         
         Ok(())
     }

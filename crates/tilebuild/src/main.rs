@@ -22,11 +22,11 @@ struct Opt {
     output_dir: PathBuf,
 
     /// Maximum zoom level (0-based)
-    #[clap(short, long, default_value_t = 3)]
+    #[clap(short, long, default_value_t = 4)]
     max_zoom_level: u32,
     
     /// Tile size in pixels (longest edge)
-    #[clap(long, default_value_t = 256)]
+    #[clap(long, default_value_t = 512)]
     tile_size: u32,
     
     /// Overlap between tiles in pixels
@@ -64,12 +64,31 @@ fn main() -> Result<()> {
     let location = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_buf)
         .with_context(|| "Failed to parse location data from buffer")?;
     
+    // Set up render flags for each zoom level
+    let max_zoom = opt.max_zoom_level;
+    let mut show_vertices = vec![false; (max_zoom + 1) as usize];
+    let mut min_priority = vec![0; (max_zoom + 1) as usize];
+    
+    // Configure zoom levels according to requirements
+    // Show vertices only for zoom levels 3+
+    for level in 0..=max_zoom {
+        show_vertices[level as usize] = level >= 3;
+    }
+    
+    // Set minimum priority thresholds for each level
+    if max_zoom >= 0 { min_priority[0] = 8; }
+    if max_zoom >= 1 { min_priority[1] = 6; }
+    if max_zoom >= 2 { min_priority[2] = 4; }
+    if max_zoom >= 3 { min_priority[3] = 0; }
+    
     // Set up configuration
     let config = TileBuildConfig {
         output_dir: opt.output_dir.clone(),
         max_zoom_level: opt.max_zoom_level,
         tile_size: opt.tile_size,
         tile_overlap: opt.tile_overlap,
+        show_vertices,
+        min_priority,
         viz_config: graphviz::VizConfig {
             max_size: opt.tile_size,
             node_size: 0,

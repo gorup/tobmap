@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     
     // Then render the final image
     println!("Rendering image...");
-    let image = render_tile(&world_data, &config)
+    let image = render_tile(&world_data, &config, 0) // Default to min_priority of 0 for backwards compatibility
         .with_context(|| "Failed to render visualization")?;
 
     // Save the image with the determined format

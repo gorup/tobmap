@@ -432,6 +432,7 @@ pub fn process_world_data(
 pub fn render_tile(
     world: &WorldData,
     config: &VizConfig,
+    min_priority: usize,
 ) -> StatusOr<RgbImage> {
     // Get base configuration values
     let node_size = config.node_size;
@@ -539,6 +540,12 @@ pub fn render_tile(
             continue; // Skip edges with empty paths
         }
 
+        // Skip edges with priority lower than min_priority
+        let edge_priority = (props.priority_multiplier * 2.0) as usize;
+        if edge_priority < min_priority {
+            continue;
+        }
+
         // Determine if this is the highlighted edge
         let is_highlighted = highlight_edge_index.map_or(false, |idx| i == idx as usize);
 
@@ -602,14 +609,16 @@ pub fn render_tile(
         }
     }
 
-    // Add nodes to image as circles
-    for (i, &(lng, lat)) in world.node_positions.iter().enumerate() {
-        if is_in_bounds(lng, lat) {
-            let (x, y) = to_img_coords(lng, lat);
-            draw_filled_circle_mut(&mut image, (x as i32, y as i32), node_size as i32, gray);
+    // Add nodes to image as circles if node_size > 0
+    if node_size > 0 {
+        for (i, &(lng, lat)) in world.node_positions.iter().enumerate() {
+            if is_in_bounds(lng, lat) {
+                let (x, y) = to_img_coords(lng, lat);
+                draw_filled_circle_mut(&mut image, (x as i32, y as i32), node_size as i32, gray);
 
-            if show_labels {
-                // Text rendering placeholder
+                if show_labels {
+                    // Text rendering placeholder
+                }
             }
         }
     }
@@ -624,5 +633,5 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
     let world_data = process_world_data(graph, location, None, config.max_size)?;
     
     // Render the tile/image using the processed data
-    render_tile(&world_data, config)
+    render_tile(&world_data, config, 0)
 }
