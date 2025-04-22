@@ -63,7 +63,6 @@ fn main() -> Result<()> {
 
     let location = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_buf)
         .with_context(|| "Failed to parse location data from buffer")?;
-
     
     // Set up configuration
     let config = TileBuildConfig {
@@ -82,12 +81,14 @@ fn main() -> Result<()> {
             highlight_edge_index: None,
             highlight_edge_width: None,
             tile: None,
+            description: None,
         },
     };
     
     // Generate tiles
     let tile_builder = TileBuilder::new(config);
     println!("Generating tiles in {:?}...", opt.output_dir);
+    println!("This may take a while but will be faster with our optimized approach!");
     tile_builder.build_all_tiles(&graph, &location)?;
     
     println!("Done!");

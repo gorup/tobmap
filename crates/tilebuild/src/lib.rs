@@ -1,6 +1,6 @@
 use anyhow::{Result, Context};
 use schema::tobmapgraph::{GraphBlob, LocationBlob};
-use graphviz::{visualize_graph, VizConfig, TileConfig};
+use graphviz::{visualize_graph, VizConfig, TileConfig, process_world_data, render_tile, WorldData};
 use std::path::{Path, PathBuf};
 use std::fs;
 
@@ -32,6 +32,7 @@ impl Default for TileBuildConfig {
                 highlight_edge_index: None,
                 highlight_edge_width: None,
                 tile: None,
+                description: None,
             },
         }
     }
@@ -65,25 +66,32 @@ impl TileBuilder {
     
     /// Build all tiles for all zoom levels
     pub fn build_all_tiles(&self, graph: &GraphBlob, location: &LocationBlob) -> Result<()> {
+        // Create output directories
         self.create_directories()?;
+        
+        // Process world data once - this is the performance improvement
+        println!("Pre-processing world data...");
+        let world_data = process_world_data(graph, location, None, self.config.viz_config.max_size)
+            .with_context(|| "Failed to process world data")?;
+        println!("World data processed: {} nodes, {} edges", world_data.nodes_count, world_data.edges_count);
         
         // For each zoom level
         for level in 0..=self.config.max_zoom_level {
-            self.build_level_tiles(level, graph, location)?;
+            self.build_level_tiles(level, &world_data)?;
         }
         
         Ok(())
     }
     
     /// Build all tiles for a specific zoom level
-    fn build_level_tiles(&self, level: u32, graph: &GraphBlob, location: &LocationBlob) -> Result<()> {
+    fn build_level_tiles(&self, level: u32, world: &WorldData) -> Result<()> {
         // For each level, we have 3^level tiles per side
         let tiles_per_side = 3u32.pow(level);
         println!("Building level {} with {}x{} tiles...", level, tiles_per_side, tiles_per_side);
         
         for row in 0..tiles_per_side {
             for col in 0..tiles_per_side {
-                self.build_single_tile(level, row, col, tiles_per_side, graph, location)?;
+                self.build_single_tile(level, row, col, tiles_per_side, world)?;
             }
         }
         
@@ -97,8 +105,7 @@ impl TileBuilder {
         row: u32, 
         col: u32, 
         tiles_per_side: u32,
-        graph: &GraphBlob, 
-        location: &LocationBlob
+        world: &WorldData
     ) -> Result<()> {
         println!("  Generating tile {}/{}: level={}, row={}, col={}...", 
             row * tiles_per_side + col + 1, 
@@ -115,8 +122,8 @@ impl TileBuilder {
             overlap_pixels: self.config.tile_overlap,
         });
         
-        // Render the tile
-        let image = visualize_graph(graph, location, &viz_config)
+        // Render the tile using the pre-processed world data
+        let image = render_tile(world, &viz_config)
             .with_context(|| format!("Failed to render tile: level={}, row={}, col={}", level, row, col))?;
         
         // Save the image

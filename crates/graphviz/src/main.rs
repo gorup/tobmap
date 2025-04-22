@@ -9,7 +9,7 @@ use image::ImageFormat;
 use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
 
 // Import from the library crate
-use graphviz::{visualize_graph, VizConfig};
+use graphviz::{visualize_graph, VizConfig, process_world_data, render_tile, WorldData};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Generate PNG/JPG visualization of graph data")]
@@ -24,7 +24,7 @@ struct Args {
 
     /// Path to the optional description.fbs file (for road priorities)
     #[arg(short = 'd', long)]
-    description: PathBuf,
+    description: Option<PathBuf>,
 
     /// Path to the output image file (e.g., output.png or output.jpg)
     output: PathBuf, // Changed from #[arg(short, long)] to positional
@@ -93,14 +93,28 @@ fn main() -> Result<()> {
     location_file.read_to_end(&mut location_buffer)
         .with_context(|| "Failed to read location file")?;
 
-    // Read and parse the location file
-    let mut description_file = File::open(&args.description)
-        .with_context(|| format!("Failed to open description file: {:?}", args.description))?;
-
+    // Read and parse the description file if provided
     let mut description_buffer = Vec::new();
-    description_file.read_to_end(&mut description_buffer)
-        .with_context(|| "Failed to read description file")?;
+    let mut description_option = None;
+    
+    if let Some(description_path) = &args.description {
+        let mut description_file = File::open(description_path)
+            .with_context(|| format!("Failed to open description file: {:?}", description_path))?;
 
+        description_file.read_to_end(&mut description_buffer)
+            .with_context(|| "Failed to read description file")?;
+
+        // Parse description file
+        let verifier_opts = flatbuffers::VerifierOptions {
+            max_tables: 3_000_000_000, // 3 billion tables
+            ..Default::default()
+        };
+        
+        let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
+            .with_context(|| "Failed to parse description data from buffer")?;
+            
+        description_option = Some(description);
+    }
 
     // Use get_root_with_opts instead of root for better error handling and custom verifier options
     let verifier_opts = flatbuffers::VerifierOptions {
@@ -114,9 +128,6 @@ fn main() -> Result<()> {
     let location = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_buffer)
         .with_context(|| "Failed to parse location data from buffer")?;
 
-    let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
-        .with_context(|| "Failed to parse description data from buffer")?;
-
     // Create VizConfig from Args
     let config = VizConfig {
         max_size: args.max_size,
@@ -129,15 +140,22 @@ fn main() -> Result<()> {
         highlight_edge_index: args.highlight_edge_index,
         highlight_edge_width: args.highlight_edge_width,
         tile: None, // Not using tiling in this example
-        description: &description, // Pass the optional description data
+        description: description_option.as_ref(), // Pass the optional description data
     };
 
-    // Generate the PNG visualization using the library function
-    let image = visualize_graph(&graph, &location, &config)
-        .map_err(|e| anyhow::Error::new(e)) // Convert library error to anyhow::Error
-        .with_context(|| "Failed to generate visualization")?;
+    println!("Processing world data...");
+    // First process the world data (the optimization)
+    let world_data = process_world_data(&graph, &location, description_option.as_ref(), args.max_size)
+        .with_context(|| "Failed to process world data")?;
+    println!("Processed {} nodes and {} edges", world_data.nodes_count, world_data.edges_count);
+    
+    // Then render the final image
+    println!("Rendering image...");
+    let image = render_tile(&world_data, &config)
+        .with_context(|| "Failed to render visualization")?;
 
     // Save the image with the determined format
+    println!("Saving image to {:?}...", args.output);
     image.save_with_format(&args.output, output_format)
         .with_context(|| format!("Failed to save image to {:?}", args.output))?;
 

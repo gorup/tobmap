@@ -45,7 +45,49 @@ pub struct VizConfig<'a> {
     pub highlight_edge_index: Option<u32>,
     pub highlight_edge_width: Option<f32>,
     pub tile: Option<TileConfig>, // New field for tiling configuration
-    pub description: &'a DescriptionBlob<'a>, // Add reference to description blob
+    pub description: Option<&'a DescriptionBlob<'a>>, // Make description optional
+}
+
+/// Pre-processed world data that can be reused across multiple tile renderings
+pub struct WorldData {
+    pub node_positions: Vec<(f64, f64)>,      // Longitude, Latitude for each node
+    pub edge_paths: Vec<Vec<(f64, f64)>>,     // Paths of points for each edge
+    pub edge_properties: Vec<EdgeProperties>, // Properties of each edge
+    pub full_bounds: MapBounds,               // Geographic bounds of entire map
+    pub full_dimensions: (u32, u32),          // Image dimensions for entire map
+    pub nodes_count: usize,                   // Number of nodes
+    pub edges_count: usize,                   // Number of edges
+}
+
+/// Geographic bounds of a map region
+#[derive(Clone, Copy, Debug)]
+pub struct MapBounds {
+    pub min_lat: f64,
+    pub max_lat: f64,
+    pub min_lng: f64,
+    pub max_lng: f64,
+}
+
+impl MapBounds {
+    pub fn width(&self) -> f64 {
+        self.max_lng - self.min_lng
+    }
+    
+    pub fn height(&self) -> f64 {
+        self.max_lat - self.min_lat
+    }
+}
+
+/// Properties of an edge
+#[derive(Clone, Debug)]
+pub struct EdgeProperties {
+    pub node1_idx: usize,
+    pub node2_idx: usize,
+    pub backwards_allowed: bool,
+    pub time_seconds: u16,
+    pub distance_meters: f64,
+    pub priority_multiplier: f32,
+    pub color: Rgb<u8>,
 }
 
 /// Converts S2 CellID to lat/lng
@@ -205,8 +247,6 @@ fn get_cost_color(cost: u8) -> Rgb<u8> {
 }
 
 /// Simple line-rectangle intersection check (Axis-Aligned Bounding Box)
-/// Returns true if the line segment (p1 -> p2) potentially intersects or is inside the box.
-/// This is a basic check and not a full clipping algorithm.
 fn line_crosses_bounds(x1: f64, y1: f64, x2: f64, y2: f64, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> bool {
     // Check if both points are outside on the same side
     if (x1 < min_x && x2 < min_x) || (x1 > max_x && x2 > max_x) ||
@@ -218,9 +258,13 @@ fn line_crosses_bounds(x1: f64, y1: f64, x2: f64, y2: f64, min_x: f64, min_y: f6
     true
 }
 
-
-/// Main function to create PNG visualization from graph data
-pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizConfig) -> StatusOr<RgbImage> {
+/// Pre-process graph data into reusable WorldData structure
+pub fn process_world_data(
+    graph: &GraphBlob, 
+    location: &LocationBlob, 
+    description: Option<&DescriptionBlob>,
+    max_size: u32
+) -> StatusOr<WorldData> {
     // Extract all nodes and edges
     let nodes = graph.nodes().ok_or_else(|| GraphVizError::ParseError("Failed to get nodes".to_string()))?;
     let edges = graph.edges().ok_or_else(|| GraphVizError::ParseError("Failed to get edges".to_string()))?;
@@ -232,7 +276,7 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         GraphVizError::ParseError("Failed to get edge locations".to_string()))?;
 
     // Get edge descriptions if available
-    let edge_descriptions = config.description.edge_descriptions();
+    let edge_descriptions = description.and_then(|desc| desc.edge_descriptions());
 
     // Verify we have the same number of nodes and node locations
     if nodes.len() != node_locations.len() {
@@ -247,22 +291,161 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
             edges.len(), edge_locations.len())));
     }
 
-    // Calculate bounds of the map
+    // Store all node positions and calculate bounds
     let mut min_lat = f64::MAX;
     let mut max_lat = f64::MIN;
     let mut min_lng = f64::MAX;
     let mut max_lng = f64::MIN;
 
-    // Store all node positions first
+    // Store all node positions
     let node_positions: Vec<(f64, f64)> = (0..node_locations.len())
         .map(|i| {
             let node_location = node_locations.get(i);
             let latlng = cell_id_to_latlng(node_location.cell_id());
-            (latlng.lng.deg(), latlng.lat.deg()) // x = longitude, y = latitude
+            let lng = latlng.lng.deg();
+            let lat = latlng.lat.deg();
+            
+            // Update bounds
+            min_lat = min_lat.min(lat);
+            max_lat = max_lat.max(lat);
+            min_lng = min_lng.min(lng);
+            max_lng = max_lng.max(lng);
+            
+            (lng, lat) // x = longitude, y = latitude
         })
         .collect();
 
-    // Determine map bounds: either from zoom config or from all nodes
+    // Store map bounds
+    let bounds = MapBounds {
+        min_lat,
+        max_lat,
+        min_lng,
+        max_lng,
+    };
+
+    // Calculate full image dimensions
+    let aspect_ratio = bounds.width() / bounds.height();
+    let (full_img_width, full_img_height) = if aspect_ratio > 1.0 {
+        (max_size, (max_size as f64 / aspect_ratio) as u32)
+    } else {
+        ((max_size as f64 * aspect_ratio) as u32, max_size)
+    };
+
+    // Pre-process all edge paths and properties
+    let mut edge_paths = Vec::with_capacity(edges.len());
+    let mut edge_properties = Vec::with_capacity(edges.len());
+
+    for i in 0..edges.len() {
+        let edge = edges.get(i);
+        let edge_location = edge_locations.get(i);
+
+        let node1_idx = edge.point_1_node_idx() as usize;
+        let node2_idx = edge.point_2_node_idx() as usize;
+
+        if node1_idx >= node_positions.len() || node2_idx >= node_positions.len() {
+            eprintln!("Warning: Edge {} references non-existent node index {} or {}", i, node1_idx, node2_idx);
+            // Add empty data to maintain indices alignment
+            edge_paths.push(Vec::new());
+            edge_properties.push(EdgeProperties {
+                node1_idx,
+                node2_idx,
+                backwards_allowed: false,
+                time_seconds: 0,
+                distance_meters: 0.0,
+                priority_multiplier: 1.0,
+                color: Rgb([0, 0, 0]),
+            });
+            continue;
+        }
+
+        let (lng1, lat1) = node_positions[node1_idx];
+        let (lng2, lat2) = node_positions[node2_idx];
+
+        // Extract edge properties
+        let costs_and_flags = edge.costs_and_flags();
+        let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
+        let time_seconds: u16 = (costs_and_flags >> 3) as u16;
+        let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
+        
+        // Get edge priority from description if available
+        let mut priority_multiplier = 1.0;
+        if let Some(descriptions) = edge_descriptions {
+            if i < descriptions.len() {
+                let desc = descriptions.get(i);
+                let priority = desc.priority();
+
+                // Classify priority into width categories
+                priority_multiplier = match priority {
+                    0..=4 => 1.0,  // Lowest priority
+                    5..=6 => 2.0,  // Medium-low priority
+                    7..=8 => 3.0,  // Medium-high priority
+                    _ => 5.0,      // Highest priority
+                };
+            }
+        }
+
+        // Determine edge color
+        let color = get_speed_color(distance_meters, time_seconds);
+
+        // Store edge properties
+        edge_properties.push(EdgeProperties {
+            node1_idx,
+            node2_idx,
+            backwards_allowed,
+            time_seconds,
+            distance_meters,
+            priority_multiplier,
+            color,
+        });
+
+        // Construct the full path for the edge
+        let mut path = Vec::new();
+        path.push((lng1, lat1)); // Start node
+
+        // Add intermediate points if any
+        if let Some(cell_ids) = edge_location.points() {
+            if cell_ids.len() > 0 {
+                for cell_id in cell_ids {
+                    let latlng = cell_id_to_latlng(cell_id);
+                    path.push((latlng.lng.deg(), latlng.lat.deg()));
+                }
+            }
+        }
+
+        path.push((lng2, lat2)); // End node
+        edge_paths.push(path);
+    }
+
+    // Return the processed world data
+    Ok(WorldData {
+        node_positions,
+        edge_paths,
+        edge_properties,
+        full_bounds: bounds,
+        full_dimensions: (full_img_width, full_img_height),
+        nodes_count: nodes.len(),
+        edges_count: edges.len(),
+    })
+}
+
+/// Render a tile using pre-processed world data
+pub fn render_tile(
+    world: &WorldData,
+    config: &VizConfig,
+) -> StatusOr<RgbImage> {
+    // Get base configuration values
+    let node_size = config.node_size;
+    let base_edge_width = config.edge_width;
+    let highlight_edge_index = config.highlight_edge_index;
+    let highlight_edge_width = config.highlight_edge_width;
+    let show_labels = config.show_labels;
+
+    // Default to full map bounds
+    let mut bounds = world.full_bounds;
+    let mut img_width = world.full_dimensions.0;
+    let mut img_height = world.full_dimensions.1;
+
+    // If zooming is enabled, adjust bounds
     if let (Some(center_lat), Some(center_lng), Some(zoom_meters)) = (config.center_lat, config.center_lng, config.zoom_meters) {
         // Calculate bounds based on center and zoom
         let meters_per_lng = meters_per_degree_lng(center_lat);
@@ -272,50 +455,14 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         let delta_lat = (zoom_meters / 2.0) / METERS_PER_DEGREE_LAT;
         let delta_lng = (zoom_meters / 2.0) / meters_per_lng;
 
-        min_lat = center_lat - delta_lat;
-        max_lat = center_lat + delta_lat;
-        min_lng = center_lng - delta_lng;
-        max_lng = center_lng + delta_lng;
-    } else {
-        // Calculate bounds based on all nodes (existing behavior)
-        for &(lng, lat) in &node_positions {
-            min_lat = min_lat.min(lat);
-            max_lat = max_lat.max(lat);
-            min_lng = min_lng.min(lng);
-            max_lng = max_lng.max(lng);
-        }
+        bounds.min_lat = center_lat - delta_lat;
+        bounds.max_lat = center_lat + delta_lat;
+        bounds.min_lng = center_lng - delta_lng;
+        bounds.max_lng = center_lng + delta_lng;
     }
 
-    // Determine map dimensions (geographic range)
-    let width = max_lng - min_lng;
-    let height = max_lat - min_lat;
-
-    // Handle cases where bounds are invalid (e.g., single point, zoom near pole failed)
-    if width <= 0.0 || height <= 0.0 {
-        return Err(GraphVizError::ImageError(format!(
-            "Invalid map bounds calculated: width={}, height={}. Ensure valid zoom or sufficient node spread.",
-            width, height
-        )));
-    }
-
-    // Store original bounds for the complete map
-    let full_min_lat = min_lat;
-    let full_max_lat = max_lat;
-    let full_min_lng = min_lng;
-    let full_max_lng = max_lng;
-    let full_width = width;
-    let full_height = height;
-
-    // Calculate full image dimensions
-    let aspect_ratio = full_width / full_height;
-    let (full_img_width, full_img_height) = if aspect_ratio > 1.0 {
-        (config.max_size, (config.max_size as f64 / aspect_ratio) as u32)
-    } else {
-        ((config.max_size as f64 * aspect_ratio) as u32, config.max_size)
-    };
-
-    // Check if we're rendering a tile
-    let (img_width, img_height) = if let Some(tile) = &config.tile {
+    // If we're rendering a tile, adjust bounds and dimensions
+    if let Some(tile) = &config.tile {
         // Validate tile configuration
         if tile.row_index >= tile.rows || tile.column_index >= tile.columns {
             return Err(GraphVizError::ImageError(format!(
@@ -325,39 +472,34 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
         }
 
         // Calculate the geographic bounds for this specific tile
-        let tile_width = full_width / tile.columns as f64;
-        let tile_height = full_height / tile.rows as f64;
+        let tile_width = world.full_bounds.width() / tile.columns as f64;
+        let tile_height = world.full_bounds.height() / tile.rows as f64;
 
         // Calculate actual tile bounds with overlap
-        let overlap_lng = (tile.overlap_pixels as f64 / full_img_width as f64) * full_width;
-        let overlap_lat = (tile.overlap_pixels as f64 / full_img_height as f64) * full_height;
+        let overlap_lng = (tile.overlap_pixels as f64 / world.full_dimensions.0 as f64) * world.full_bounds.width();
+        let overlap_lat = (tile.overlap_pixels as f64 / world.full_dimensions.1 as f64) * world.full_bounds.height();
 
         // Update bounds for this specific tile (with overlap)
-        min_lng = full_min_lng + tile.column_index as f64 * tile_width - (if tile.column_index > 0 { overlap_lng } else { 0.0 });
-        max_lng = full_min_lng + (tile.column_index + 1) as f64 * tile_width + (if tile.column_index + 1 < tile.columns { overlap_lng } else { 0.0 });
+        bounds.min_lng = world.full_bounds.min_lng + tile.column_index as f64 * tile_width 
+            - (if tile.column_index > 0 { overlap_lng } else { 0.0 });
+        bounds.max_lng = world.full_bounds.min_lng + (tile.column_index + 1) as f64 * tile_width 
+            + (if tile.column_index + 1 < tile.columns { overlap_lng } else { 0.0 });
         
         // Note: latitude increases northward (upward) but image y-coordinates increase downward
-        max_lat = full_max_lat - tile.row_index as f64 * tile_height + (if tile.row_index > 0 { overlap_lat } else { 0.0 });
-        min_lat = full_max_lat - (tile.row_index + 1) as f64 * tile_height - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
+        bounds.max_lat = world.full_bounds.max_lat - tile.row_index as f64 * tile_height 
+            + (if tile.row_index > 0 { overlap_lat } else { 0.0 });
+        bounds.min_lat = world.full_bounds.max_lat - (tile.row_index + 1) as f64 * tile_height 
+            - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
 
         // Calculate tile image dimensions (including overlap)
-        let tile_img_width = full_img_width + 
+        img_width = world.full_dimensions.0 / tile.columns + 
             (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
             (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
         
-        let tile_img_height = full_img_height + 
+        img_height = world.full_dimensions.1 / tile.rows + 
             (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
             (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
-            
-        (tile_img_width, tile_img_height)
-    } else {
-        // Not tiling, use the full image dimensions
-        (full_img_width, full_img_height)
-    };
-
-    // Update width and height based on the potentially modified bounds
-    let width = max_lng - min_lng;
-    let height = max_lat - min_lat;
+    }
 
     // Create an empty white image
     let mut image = RgbImage::new(img_width, img_height);
@@ -372,167 +514,67 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
 
     // Helper function to convert lat/lng to image coordinates
     let to_img_coords = |lng: f64, lat: f64| -> (f32, f32) {
-        let x = (lng - min_lng) / width * img_width as f64;
+        let x = (lng - bounds.min_lng) / bounds.width() * img_width as f64;
         // Note: y-axis is inverted (0 at top)
-        let y = (max_lat - lat) / height * img_height as f64;
+        let y = (bounds.max_lat - lat) / bounds.height() * img_height as f64;
         (x as f32, y as f32)
     };
 
     // Helper to check if a point is within bounds
     let is_in_bounds = |lng: f64, lat: f64| -> bool {
-        lng >= min_lng && lng <= max_lng && lat >= min_lat && lat <= max_lat
+        lng >= bounds.min_lng && lng <= bounds.max_lng && lat >= bounds.min_lat && lat <= bounds.max_lat
     };
 
     // Arrow size for direction indicators (relative to edge width)
-    let arrow_size = 6.0 * config.edge_width.max(1.0); // Ensure arrow size scales reasonably even for thin lines
+    let arrow_size = 6.0 * base_edge_width.max(1.0);
 
     // Add edges to image
-    for i in 0..edges.len() {
-        let edge = edges.get(i);
-        let edge_location = edge_locations.get(i); // Get corresponding edge location data
-
-        let node1_idx = edge.point_1_node_idx() as usize;
-        let node2_idx = edge.point_2_node_idx() as usize;
-
-        if node1_idx >= node_positions.len() || node2_idx >= node_positions.len() {
-            eprintln!("Warning: Edge {} references non-existent node index {} or {}", i, node1_idx, node2_idx);
-            continue;
+    for (i, (path, props)) in world.edge_paths.iter().zip(world.edge_properties.iter()).enumerate() {
+        if path.is_empty() {
+            continue; // Skip edges with empty paths
         }
-
-        let (lng1, lat1) = node_positions[node1_idx];
-        let (lng2, lat2) = node_positions[node2_idx];
 
         // Determine if this is the highlighted edge
-        let is_highlighted_edge = config.highlight_edge_index.map_or(false, |idx| i == idx as usize);
+        let is_highlighted = highlight_edge_index.map_or(false, |idx| i == idx as usize);
 
-        // Calculate overall edge properties (color based on total distance/time)
-        let costs_and_flags = edge.costs_and_flags();
-        let backwards_allowed = (costs_and_flags & 0b0000_0000_0000_0001) != 0;
-        let time_seconds: u16 = (costs_and_flags >> 3) as u16;
-        let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
-        // Get edge priority from description if available
-        let mut priority_multiplier = 1.0;
-        if let Some(descriptions) = edge_descriptions {
-            if i < descriptions.len() {
-            let desc = descriptions.get(i);
-            let priority = desc.priority();
-
-            // Classify priority into one of 4 width categories
-            priority_multiplier = match priority {
-                0..=4 => 1.0,  // Lowest priority
-                5..=6 => 2.0,  // Medium-low priority
-                7..=8 => 3.0,  // Medium-high priority
-                _ => 5.0,      // Highest priority
-            };
-
-            // Log street names if this is the highlighted edge
-            if is_highlighted_edge {
-                if let Some(street_names) = desc.street_names() {
-                println!("    Street Names:");
-                for j in 0..street_names.len() {
-                    println!("      [{}]: {}", j, street_names.get(j));
-                }
-                }
-            }
-            }
-        }
-
-        // Determine edge color and width
-        let mut current_edge_color = get_speed_color(distance_meters, time_seconds);
-        let mut current_edge_width = config.edge_width * priority_multiplier;
-
-        if is_highlighted_edge {
-            current_edge_color = yellow;
-            current_edge_width = config.highlight_edge_width.unwrap_or(config.edge_width * 2.0 * priority_multiplier); // Use specified width or double the default
-        }
-
-        // Construct the full path for the edge
-        let mut path_coords: Vec<(f64, f64)> = Vec::new();
-        path_coords.push((lng1, lat1)); // Start node
-
-        let mut intermediate_cell_ids: Vec<u64> = Vec::new();
-        if let Some(cell_ids) = edge_location.points() {
-            if cell_ids.len() > 0 {
-                for cell_id in cell_ids {
-                    intermediate_cell_ids.push(cell_id); // Store for logging
-                    let latlng = cell_id_to_latlng(cell_id);
-                    path_coords.push((latlng.lng.deg(), latlng.lat.deg()));
-                }
-            }
-        }
-
-        path_coords.push((lng2, lat2)); // End node
-
-        // Log details if this is the highlighted edge
-        if is_highlighted_edge {
-            println!("--- Highlighting Edge Index: {} ---", i);
-            println!("  Graph Data:");
-            println!("    Node 1 Index: {}", node1_idx);
-            println!("    Node 2 Index: {}", node2_idx);
-            println!("    Costs and Flags Raw: {:#018b} ({})", costs_and_flags, costs_and_flags);
-            println!("    Backwards Allowed: {}", backwards_allowed);
-            println!("    Time (seconds): {}", time_seconds);
-            if let Some(descriptions) = edge_descriptions {
-                if i < descriptions.len() {
-                    println!("    Priority: {}", descriptions.get(i).priority());
-                    println!("    Priority Multiplier: {:.2}", priority_multiplier);
-                }
-            }
-            println!("  Location Data:");
-            println!("    Start Node Lat/Lng: ({}, {})", lat1, lng1);
-            println!("    End Node Lat/Lng: ({}, {})", lat2, lng2);
-            println!("    Intermediate Points ({}):", intermediate_cell_ids.len());
-            for (idx, cell_id) in intermediate_cell_ids.iter().enumerate() {
-                let latlng = cell_id_to_latlng(*cell_id);
-                println!("      [{}]: CellID={} -> Lat/Lng=({}, {})", idx, cell_id, latlng.lat.deg(), latlng.lng.deg());
-            }
-            println!("  Calculated Properties:");
-            println!("    Distance (meters): {:.2}", distance_meters);
-            if time_seconds > 0 {
-                println!("    Avg Speed (m/s): {:.2}", distance_meters / time_seconds as f64);
-                println!("    Avg Speed (km/h): {:.2}", (distance_meters / time_seconds as f64) * 3.6);
-            } else {
-                println!("    Avg Speed: Instantaneous (time = 0)");
-            }
-            println!("  Rendering:");
-            println!("    Color: Rgb({}, {}, {})", current_edge_color.0[0], current_edge_color.0[1], current_edge_color.0[2]);
-            println!("    Width: {}", current_edge_width);
-            println!("------------------------------------");
-        }
+        // Set edge color and width
+        let color = if is_highlighted { yellow } else { props.color };
+        let width = if is_highlighted {
+            highlight_edge_width.unwrap_or(base_edge_width * 2.0 * props.priority_multiplier)
+        } else {
+            base_edge_width * props.priority_multiplier
+        };
 
         // Draw segments of the path
-        let mut last_img_coords: Option<(f32, f32)> = None;
-        for j in 0..path_coords.len() - 1 {
-            let (p1_lng, p1_lat) = path_coords[j];
-            let (p2_lng, p2_lat) = path_coords[j+1];
+        let mut last_segment_visible = false;
+        for j in 0..path.len() - 1 {
+            let (p1_lng, p1_lat) = path[j];
+            let (p2_lng, p2_lat) = path[j+1];
 
             // Check if segment is potentially visible
             let p1_in_bounds = is_in_bounds(p1_lng, p1_lat);
             let p2_in_bounds = is_in_bounds(p2_lng, p2_lat);
 
-            // Simple visibility check: draw if either point is in bounds or line crosses bounds
-            // A more robust check would involve line clipping, but this is often sufficient
-            if p1_in_bounds || p2_in_bounds || line_crosses_bounds(p1_lng, p1_lat, p2_lng, p2_lat, min_lng, min_lat, max_lng, max_lat) {
+            // Draw segment if visible or crossing bounds
+            if p1_in_bounds || p2_in_bounds || line_crosses_bounds(
+                p1_lng, p1_lat, p2_lng, p2_lat, 
+                bounds.min_lng, bounds.min_lat, bounds.max_lng, bounds.max_lat
+            ) {
                 let (x1, y1) = to_img_coords(p1_lng, p1_lat);
                 let (x2, y2) = to_img_coords(p2_lng, p2_lat);
 
-                // Use the determined color and width
-                draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), current_edge_color, current_edge_width);
-                last_img_coords = Some((x2, y2)); // Store the end coords of the last drawn segment
+                draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), color, width);
+                last_segment_visible = true;
             } else {
-                 // If segment is entirely out of bounds, reset last_img_coords for arrow drawing logic
-                 // This prevents drawing arrows for edges completely outside the view.
-                 // However, we need the *previous* point if the *last* segment ends in bounds.
-                 // Let's refine this: we need the image coords of the last *two* points of the path.
+                last_segment_visible = false;
             }
         }
 
-        // Draw arrow head for one-way edges at the end of the last segment
-        if !backwards_allowed && path_coords.len() >= 2 {
-            let (p_last_lng, p_last_lat) = path_coords[path_coords.len() - 1];
-            let (p_second_last_lng, p_second_last_lat) = path_coords[path_coords.len() - 2];
+        // Draw arrow head for one-way edges at the end of the path if visible
+        if !props.backwards_allowed && path.len() >= 2 && last_segment_visible {
+            let (p_last_lng, p_last_lat) = path[path.len() - 1];
+            let (p_second_last_lng, p_second_last_lat) = path[path.len() - 2];
 
-            // Check if the end point is within bounds before drawing arrow
             if is_in_bounds(p_last_lng, p_last_lat) || is_in_bounds(p_second_last_lng, p_second_last_lat) {
                 let (x_last, y_last) = to_img_coords(p_last_lng, p_last_lat);
                 let (x_second_last, y_second_last) = to_img_coords(p_second_last_lng, p_second_last_lat);
@@ -542,33 +584,40 @@ pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizC
                 let len_sq = dx*dx + dy*dy;
 
                 if len_sq > 0.01 { // Avoid drawing arrows on zero-length segments
-                    // Calculate arrow base position slightly back from the end point along the last segment
+                    // Calculate arrow base position slightly back from the end point
                     let len = len_sq.sqrt();
-                    let arrow_offset = (arrow_size * 1.5).min(len * 0.4); // Place arrow base back from the end point
+                    let arrow_offset = (arrow_size * 1.5).min(len * 0.4);
 
                     let arrow_base_x = x_last - dx * arrow_offset / len;
                     let arrow_base_y = y_last - dy * arrow_offset / len;
 
-                    // Use the determined color and width for the arrow
-                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), current_edge_color, arrow_size, current_edge_width);
+                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), color, arrow_size, width);
                 }
             }
         }
     }
 
     // Add nodes to image as circles
-    for (i, &(lng, lat)) in node_positions.iter().enumerate() {
-        if is_in_bounds(lng, lat) { // Use helper function
+    for (i, &(lng, lat)) in world.node_positions.iter().enumerate() {
+        if is_in_bounds(lng, lat) {
             let (x, y) = to_img_coords(lng, lat);
+            draw_filled_circle_mut(&mut image, (x as i32, y as i32), node_size as i32, gray);
 
-            draw_filled_circle_mut(&mut image, (x as i32, y as i32), config.node_size as i32, gray);
-
-            if config.show_labels {
-                // Text rendering in image is more complex and would require additional libraries
-                // This is a placeholder for a text rendering implementation
+            if show_labels {
+                // Text rendering placeholder
             }
         }
     }
 
     Ok(image)
+}
+
+/// Main function to create PNG visualization from graph data
+/// Legacy function that maintains backwards compatibility
+pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizConfig) -> StatusOr<RgbImage> {
+    // Process world data
+    let world_data = process_world_data(graph, location, None, config.max_size)?;
+    
+    // Render the tile/image using the processed data
+    render_tile(&world_data, config)
 }
