@@ -5,6 +5,7 @@ use image::{Rgb, RgbImage};
 use imageproc::drawing::{draw_line_segment_mut, draw_cross_mut, draw_filled_circle_mut};
 use s2::cellid::CellID;
 use s2::latlng::LatLng;
+use log::info;
 use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
 use thiserror::Error;
 
@@ -34,9 +35,9 @@ pub struct TileConfig {
 
 /// Configuration for the visualization process.
 #[derive(Debug, Clone)]
-pub struct VizConfig<'a> {
+pub struct VizConfig {
     pub max_size: u32,
-    pub node_size: u32,
+    pub node_size: Option<u32>,  // Changed from u32 to Option<u32>
     pub edge_width: f32,
     pub show_labels: bool,
     pub center_lat: Option<f64>,
@@ -45,7 +46,6 @@ pub struct VizConfig<'a> {
     pub highlight_edge_index: Option<u32>,
     pub highlight_edge_width: Option<f32>,
     pub tile: Option<TileConfig>, // New field for tiling configuration
-    pub description: Option<&'a DescriptionBlob<'a>>, // Make description optional
 }
 
 /// Pre-processed world data that can be reused across multiple tile renderings
@@ -86,7 +86,7 @@ pub struct EdgeProperties {
     pub backwards_allowed: bool,
     pub time_seconds: u16,
     pub distance_meters: f64,
-    pub priority_multiplier: f32,
+    pub priority: u8,  // Store raw priority instead of multiplier
     pub color: Rgb<u8>,
 }
 
@@ -262,7 +262,7 @@ fn line_crosses_bounds(x1: f64, y1: f64, x2: f64, y2: f64, min_x: f64, min_y: f6
 pub fn process_world_data(
     graph: &GraphBlob, 
     location: &LocationBlob, 
-    description: Option<&DescriptionBlob>,
+    description: &DescriptionBlob,
     max_size: u32
 ) -> StatusOr<WorldData> {
     // Extract all nodes and edges
@@ -275,8 +275,9 @@ pub fn process_world_data(
     let edge_locations = location.edge_location_items().ok_or_else(||
         GraphVizError::ParseError("Failed to get edge locations".to_string()))?;
 
-    // Get edge descriptions if available
-    let edge_descriptions = description.and_then(|desc| desc.edge_descriptions());
+    // Get edge descriptions
+    let edge_descriptions = description.edge_descriptions().ok_or_else(||
+        GraphVizError::ParseError("Failed to get edge descriptions".to_string()))?;
 
     // Verify we have the same number of nodes and node locations
     if nodes.len() != node_locations.len() {
@@ -289,6 +290,12 @@ pub fn process_world_data(
         return Err(GraphVizError::ParseError(format!(
             "Mismatch between edges count ({}) and edge locations count ({})",
             edges.len(), edge_locations.len())));
+    }
+    // Verify we have the same number of edges and edge descriptions
+    if edges.len() != edge_descriptions.len() {
+        return Err(GraphVizError::ParseError(format!(
+            "Mismatch between edges count ({}) and edge descriptions count ({})",
+            edges.len(), edge_descriptions.len())));
     }
 
     // Store all node positions and calculate bounds
@@ -352,7 +359,7 @@ pub fn process_world_data(
                 backwards_allowed: false,
                 time_seconds: 0,
                 distance_meters: 0.0,
-                priority_multiplier: 1.0,
+                priority: 0,
                 color: Rgb([0, 0, 0]),
             });
             continue;
@@ -368,21 +375,12 @@ pub fn process_world_data(
         let distance_meters = haversine_distance(lat1, lng1, lat2, lng2);
         
         // Get edge priority from description if available
-        let mut priority_multiplier = 1.0;
-        if let Some(descriptions) = edge_descriptions {
-            if i < descriptions.len() {
-                let desc = descriptions.get(i);
-                let priority = desc.priority();
-
-                // Classify priority into width categories
-                priority_multiplier = match priority {
-                    0..=4 => 1.0,  // Lowest priority
-                    5..=6 => 2.0,  // Medium-low priority
-                    7..=8 => 3.0,  // Medium-high priority
-                    _ => 5.0,      // Highest priority
-                };
+        let mut priority = 0;
+            if i < edge_descriptions.len() {
+                let desc = edge_descriptions.get(i);
+                priority = desc.priority();
             }
-        }
+        
 
         // Determine edge color
         let color = get_speed_color(distance_meters, time_seconds);
@@ -394,7 +392,7 @@ pub fn process_world_data(
             backwards_allowed,
             time_seconds,
             distance_meters,
-            priority_multiplier,
+            priority,
             color,
         });
 
@@ -540,9 +538,12 @@ pub fn render_tile(
             continue; // Skip edges with empty paths
         }
 
-        // Skip edges with priority lower than min_priority
-        let edge_priority = (props.priority_multiplier * 2.0) as usize;
-        if edge_priority < min_priority {
+        // Get the edge priority as an integer
+        let edge_priority = props.priority as usize;
+        
+        // Fixed logic: Show edges with priority >= min_priority
+        // info!("Edge {}: Priority {}, Min Priority {}", i, edge_priority, min_priority);
+        if min_priority > 0 && edge_priority < min_priority {
             continue;
         }
 
@@ -552,9 +553,9 @@ pub fn render_tile(
         // Set edge color and width
         let color = if is_highlighted { yellow } else { props.color };
         let width = if is_highlighted {
-            highlight_edge_width.unwrap_or(base_edge_width * 2.0 * props.priority_multiplier)
+            highlight_edge_width.unwrap_or(base_edge_width * 2.0 * edge_priority as f32)
         } else {
-            base_edge_width * props.priority_multiplier
+            base_edge_width
         };
 
         // Draw segments of the path
@@ -609,8 +610,8 @@ pub fn render_tile(
         }
     }
 
-    // Add nodes to image as circles if node_size > 0
-    if node_size > 0 {
+    // Add nodes to image as circles only if node_size is Some (not based on value being zero)
+    if let Some(node_size) = node_size {
         for (i, &(lng, lat)) in world.node_positions.iter().enumerate() {
             if is_in_bounds(lng, lat) {
                 let (x, y) = to_img_coords(lng, lat);
@@ -628,9 +629,9 @@ pub fn render_tile(
 
 /// Main function to create PNG visualization from graph data
 /// Legacy function that maintains backwards compatibility
-pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, config: &VizConfig) -> StatusOr<RgbImage> {
+pub fn visualize_graph(graph: &GraphBlob, location: &LocationBlob, description: &DescriptionBlob, config: &VizConfig) -> StatusOr<RgbImage> {
     // Process world data
-    let world_data = process_world_data(graph, location, None, config.max_size)?;
+    let world_data = process_world_data(graph, location, description, config.max_size)?;
     
     // Render the tile/image using the processed data
     render_tile(&world_data, config, 0)

@@ -1,11 +1,12 @@
-use anyhow::{Result, Context};
-use schema::tobmapgraph::{GraphBlob, LocationBlob};
-use graphviz::{VizConfig, TileConfig, process_world_data, render_tile, WorldData};
+// Import libraries
 use std::path::{Path, PathBuf};
-use std::fs;
-use std::sync::Arc;
-use image::ImageFormat;
+use std::fs::{self, File};
+use std::sync::{Arc, Mutex};
+use anyhow::{Result, Context};
+use image::{RgbImage, ImageFormat};
 use rayon::prelude::*;
+use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
+use graphviz::{self, VizConfig, TileConfig, process_world_data, render_tile, GraphVizError, WorldData};
 
 /// Configuration for tile generation
 #[derive(Debug, Clone)]
@@ -29,7 +30,7 @@ pub struct TileBuildConfig {
     pub min_priority: Vec<usize>,
     
     // Base visualization configuration
-    pub viz_config: VizConfig<'static>,
+    pub viz_config: VizConfig,
 }
 
 /// Tile builder
@@ -44,12 +45,12 @@ impl TileBuilder {
     }
     
     /// Build all tiles for all zoom levels
-    pub fn build_all_tiles(&self, graph: &GraphBlob, location: &LocationBlob) -> Result<()> {
+    pub fn build_all_tiles(&self, graph: &GraphBlob, location: &LocationBlob, description: &DescriptionBlob) -> Result<()> {
         // Create output directory if it doesn't exist
         fs::create_dir_all(&self.config.output_dir).context("Failed to create output directory")?;
         
         // Process the world data once (heavy operation)
-        let world_data = Arc::new(process_world_data(graph, location, None, self.config.tile_size)
+        let world_data = Arc::new(process_world_data(graph, location, description, self.config.tile_size)
             .context("Failed to process world data")?);
             
         println!("Processed world data with {} nodes and {} edges", 
@@ -57,7 +58,7 @@ impl TileBuilder {
         
         // For each zoom level...
         for zoom_level in 0..=self.config.max_zoom_level {
-            self.build_zoom_level(zoom_level, graph, location, Arc::clone(&world_data))
+            self.build_zoom_level(zoom_level, graph, location, description, Arc::clone(&world_data))
                 .with_context(|| format!("Failed to build zoom level {}", zoom_level))?;
         }
         
@@ -66,7 +67,7 @@ impl TileBuilder {
     
     /// Build all tiles for a specific zoom level
     fn build_zoom_level(&self, zoom_level: u32, graph: &GraphBlob, location: &LocationBlob, 
-        world_data: Arc<WorldData>) -> Result<()> {
+        description: &DescriptionBlob, world_data: Arc<WorldData>) -> Result<()> {
         println!("Building zoom level {}...", zoom_level);
         
         // Create directory for this zoom level
@@ -96,7 +97,7 @@ impl TileBuilder {
             let col = idx % num_tiles;
             
             self.build_tile(zoom_level, row, col, num_tiles, graph, location, 
-                            Arc::clone(&world_data), show_vertices, min_priority)
+                            description, Arc::clone(&world_data), show_vertices, min_priority)
                 .with_context(|| format!("Failed to build tile {}/{} at zoom level {}", row, col, zoom_level))
         })?;
         
@@ -105,7 +106,7 @@ impl TileBuilder {
     
     /// Build a single tile
     fn build_tile(&self, zoom_level: u32, row: u32, col: u32, num_tiles: u32,
-        graph: &GraphBlob, location: &LocationBlob, world_data: Arc<WorldData>,
+        graph: &GraphBlob, location: &LocationBlob, description: &DescriptionBlob, world_data: Arc<WorldData>,
         show_vertices: bool, min_priority: usize) -> Result<()> {
         
         // Configure tile for rendering
@@ -120,7 +121,7 @@ impl TileBuilder {
         // Create a visualization config specific to this tile
         let mut viz_config = self.config.viz_config.clone();
         viz_config.tile = Some(tile_config);
-        viz_config.node_size = if show_vertices { 2 } else { 0 }; // Only draw nodes if enabled
+        viz_config.node_size = if show_vertices { Some(0) } else { None }; // Only draw nodes if enabled
         viz_config.edge_width = 1.0; // Standard edge width
         
         // Create WorldData for this zoom level with priority filtering
@@ -135,7 +136,7 @@ impl TileBuilder {
             .join(format!("{}", zoom_level))
             .join(format!("{}_{}.png", row, col));
             
-        image.save_with_format(&output_path, image::ImageFormat::Png)
+        image.save_with_format(&output_path, ImageFormat::Png)
             .with_context(|| format!("Failed to save tile image to {:?}", output_path))?;
         
         Ok(())

@@ -22,9 +22,9 @@ struct Args {
     #[arg(short = 'l', long)]
     location: PathBuf,
 
-    /// Path to the optional description.fbs file (for road priorities)
+    /// Path to the description.fbs file (for road priorities)
     #[arg(short = 'd', long)]
-    description: Option<PathBuf>,
+    description: PathBuf, // Changed from optional to required
 
     /// Path to the output image file (e.g., output.png or output.jpg)
     output: PathBuf, // Changed from #[arg(short, long)] to positional
@@ -93,28 +93,14 @@ fn main() -> Result<()> {
     location_file.read_to_end(&mut location_buffer)
         .with_context(|| "Failed to read location file")?;
 
-    // Read and parse the description file if provided
+    // Read and parse the description file 
+    // Changed from optional to required
+    let mut description_file = File::open(&args.description)
+        .with_context(|| format!("Failed to open description file: {:?}", args.description))?;
+
     let mut description_buffer = Vec::new();
-    let mut description_option = None;
-    
-    if let Some(description_path) = &args.description {
-        let mut description_file = File::open(description_path)
-            .with_context(|| format!("Failed to open description file: {:?}", description_path))?;
-
-        description_file.read_to_end(&mut description_buffer)
-            .with_context(|| "Failed to read description file")?;
-
-        // Parse description file
-        let verifier_opts = flatbuffers::VerifierOptions {
-            max_tables: 3_000_000_000, // 3 billion tables
-            ..Default::default()
-        };
-        
-        let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
-            .with_context(|| "Failed to parse description data from buffer")?;
-            
-        description_option = Some(description);
-    }
+    description_file.read_to_end(&mut description_buffer)
+        .with_context(|| "Failed to read description file")?;
 
     // Use get_root_with_opts instead of root for better error handling and custom verifier options
     let verifier_opts = flatbuffers::VerifierOptions {
@@ -127,11 +113,14 @@ fn main() -> Result<()> {
 
     let location = flatbuffers::root_with_opts::<LocationBlob>(&verifier_opts, &location_buffer)
         .with_context(|| "Failed to parse location data from buffer")?;
+        
+    let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
+        .with_context(|| "Failed to parse description data from buffer")?;
 
     // Create VizConfig from Args
     let config = VizConfig {
         max_size: args.max_size,
-        node_size: args.node_size,
+        node_size: Some(args.node_size),
         edge_width: args.edge_width,
         show_labels: args.show_labels,
         center_lat: args.center_lat,
@@ -140,12 +129,11 @@ fn main() -> Result<()> {
         highlight_edge_index: args.highlight_edge_index,
         highlight_edge_width: args.highlight_edge_width,
         tile: None, // Not using tiling in this example
-        description: description_option.as_ref(), // Pass the optional description data
     };
 
     println!("Processing world data...");
     // First process the world data (the optimization)
-    let world_data = process_world_data(&graph, &location, description_option.as_ref(), args.max_size)
+    let world_data = process_world_data(&graph, &location, &description, args.max_size)
         .with_context(|| "Failed to process world data")?;
     println!("Processed {} nodes and {} edges", world_data.nodes_count, world_data.edges_count);
     

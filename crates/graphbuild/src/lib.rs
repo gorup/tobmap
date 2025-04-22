@@ -335,6 +335,22 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>
     }
     
     info!("Built {} road segments, including {} one-way segments", road_segments.len(), oneway_count);
+    
+    // Count roads by priority
+    let mut priority_counts = [0; 11]; // Priorities from 0 to 10
+    for segment in &road_segments {
+        if segment.priority <= 10 {
+            priority_counts[segment.priority as usize] += 1;
+        }
+    }
+    
+    // Log road counts by priority
+    for (priority, count) in priority_counts.iter().enumerate() {
+        if *count > 0 {
+            info!("Priority {}: {} road segments", priority, count);
+        }
+    }
+    
     info!("Built {} road segments, will sort intersections by cell (took {:?})", road_segments.len(), last_time.elapsed());
     last_time = Instant::now();
 
@@ -765,7 +781,12 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>
     // Store edge descriptions (street names and priority) from the previously collected data
     let mut edge_descriptions = Vec::with_capacity(edge_node_pairs.len());
     
+    let mut priority_counts: HashMap<u8, usize> = HashMap::new();
+
     for (street_names, priority) in &edge_description_data {
+        // Increment the count for the current priority
+        *priority_counts.entry(*priority).or_insert(0) += 1;
+
         // Create street names vector if available
         let street_names_vector = if !street_names.is_empty() {
             let street_name_refs: Vec<&str> = street_names.iter().map(|s| s.as_str()).collect();
@@ -781,14 +802,22 @@ pub fn osm_to_graph_blob(osm_data: &[u8]) -> StatusOr<(Vec<u8>, Vec<u8>, Vec<u8>
             None
         };
         
-        // Always create an edge description with priority, even if no street names
+        // Explicitly verify priority is being used
+        let road_priority = *priority;
+        
+        // Create edge description with priority
         let edge_desc_args = EdgeDescriptionThingsArgs {
             street_names: street_names_vector,
-            priority: *priority,
+            priority: road_priority,
         };
         
         let edge_desc = EdgeDescriptionThings::create(&mut description_builder, &edge_desc_args);
         edge_descriptions.push(edge_desc);
+    }
+
+    // Log the count of edges at each priority
+    for (priority, count) in priority_counts.iter() {
+        info!("Priority {}: {} edges", priority, count);
     }
     
     // Create vector of edge description items (all edges should have descriptions now)

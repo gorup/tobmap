@@ -8,6 +8,7 @@ flatbuffers = "*"
 schema = { path = "../schema" }
 s2 = "*"
 image = "0.24"
+log = "*"
 imageproc = "0.23"
 clap = { version = "4.4", features = ["derive"] }
 anyhow = "*"
