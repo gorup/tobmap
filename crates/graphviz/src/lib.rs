@@ -491,14 +491,19 @@ pub fn render_tile(
         bounds.min_lat = world.full_bounds.max_lat - (tile.row_index + 1) as f64 * tile_height 
             - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
 
-        // Calculate tile image dimensions (including overlap)
-        img_width = world.full_dimensions.0 / tile.columns + 
-            (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
-            (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
+        // Calculate tile image dimensions - keep each tile the same size regardless of zoom level
+        // Don't divide by number of tiles; instead use the same image dimensions for each tile
+        img_width = world.full_dimensions.0;
+        img_height = world.full_dimensions.1;
         
-        img_height = world.full_dimensions.1 / tile.rows + 
-            (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
-            (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
+        // Add overlap pixels if needed
+        if tile.overlap_pixels > 0 {
+            img_width += (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
+                (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
+            
+            img_height += (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
+                (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
+        }
     }
 
     // Create an empty white image

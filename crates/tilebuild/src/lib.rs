@@ -6,15 +6,15 @@ use std::fs;
 
 /// Configuration for tile building process
 #[derive(Clone, Debug)]
-pub struct TileBuildConfig {
+pub struct TileBuildConfig<'a> {
     pub output_dir: PathBuf,        // Directory where tiles will be saved
     pub max_zoom_level: u32,        // Maximum zoom level (0-based)
     pub tile_size: u32,             // Target size for tiles (longest edge)
     pub tile_overlap: u32,          // Overlap between tiles in pixels
-    pub viz_config: VizConfig,      // Base visualization config
+    pub viz_config: VizConfig<'a>,      // Base visualization config
 }
 
-impl Default for TileBuildConfig {
+impl Default for TileBuildConfig<'_> {
     fn default() -> Self {
         Self {
             output_dir: PathBuf::from("tiles"),
@@ -38,12 +38,12 @@ impl Default for TileBuildConfig {
     }
 }
 
-pub struct TileBuilder {
-    config: TileBuildConfig,
+pub struct TileBuilder<'a> {
+    config: TileBuildConfig<'a>,
 }
 
-impl TileBuilder {
-    pub fn new(config: TileBuildConfig) -> Self {
+impl<'a> TileBuilder<'a> {
+    pub fn new(config: TileBuildConfig<'a>) -> Self {
         Self { config }
     }
     
