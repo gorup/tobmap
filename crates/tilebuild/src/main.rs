@@ -12,25 +12,25 @@ struct Opt {
     /// Path to graph.fbs file
     #[clap(short, long)]
     graph_file: PathBuf,
-    
+
     /// Path to location.fbs file
     #[clap(short, long)]
     location_file: PathBuf,
-    
+
     /// Output directory
     #[clap(short, long, default_value = "outputs/tiles")]
     output_dir: PathBuf,
-    
+
     /// Maximum zoom level (0-based)
     #[clap(short, long, default_value_t = 3)]
     max_zoom_level: u32,
     
     /// Tile size in pixels (longest edge)
-    #[clap(long, default_value_t = 2048)]
+    #[clap(long, default_value_t = 256)]
     tile_size: u32,
     
     /// Overlap between tiles in pixels
-    #[clap(long, default_value_t = 16)]
+    #[clap(long, default_value_t = 8)]
     tile_overlap: u32,
 }
 

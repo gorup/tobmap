@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use log::{info, warn, debug};
 use tilebuildraw::proto::tobmapdata::{S2CellData, Vertex, Edge};
 use schema::graph_generated::tobmapgraph;
+use anyhow::Context;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about)]
@@ -47,20 +48,20 @@ fn main() -> anyhow::Result<()> {
         TileLevel {
             name: "high".to_string(),
             s2_cell_level: 1,
-            min_priority: 8,
+            min_priority: 9,
             max_priority: 10,
         },
         TileLevel {
             name: "medium".to_string(),
             s2_cell_level: 4,
-            min_priority: 4,
-            max_priority: 7,
+            min_priority: 6,
+            max_priority: 8,
         },
         TileLevel {
             name: "low".to_string(),
             s2_cell_level: 7,
             min_priority: 0,
-            max_priority: 3,
+            max_priority: 5,
         },
     ];
 
@@ -72,9 +73,21 @@ fn main() -> anyhow::Result<()> {
 
     // Parse flatbuffers data
     info!("Parsing flatbuffers data...");
-    let graph_blob = root::<tobmapgraph::GraphBlob>(&graph_data)?;
-    let location_blob = root::<tobmapgraph::LocationBlob>(&location_data)?;
-    let description_blob = root::<tobmapgraph::DescriptionBlob>(&description_data)?;
+    // Use get_root_with_opts instead of root for better error handling and custom verifier options
+    let verifier_opts = flatbuffers::VerifierOptions {
+        max_tables: 3_000_000_000, // 3 billion tables
+        ..Default::default()
+    };
+
+    let graph_blob = flatbuffers::root_with_opts::<tobmapgraph::GraphBlob>(&verifier_opts, &graph_data)
+        .with_context(|| "Failed to parse graph data from buffer")?;
+
+    let location_blob = flatbuffers::root_with_opts::<tobmapgraph::LocationBlob>(&verifier_opts, &location_data)
+        .with_context(|| "Failed to parse location data from buffer")?;
+
+    let description_blob = flatbuffers::root_with_opts::<tobmapgraph::DescriptionBlob>(&verifier_opts, &description_data)
+        .with_context(|| "Failed to parse description data from buffer")?;
+
 
     // Process data and generate tiles for each level
     for level in &levels {
