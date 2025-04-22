@@ -3,6 +3,7 @@ use schema::tobmapgraph::{GraphBlob, LocationBlob};
 use graphviz::{visualize_graph, VizConfig, TileConfig, process_world_data, render_tile, WorldData};
 use std::path::{Path, PathBuf};
 use std::fs;
+use rayon::prelude::*;
 
 /// Configuration for tile building process
 #[derive(Clone, Debug)]
@@ -87,12 +88,49 @@ impl<'a> TileBuilder<'a> {
     fn build_level_tiles(&self, level: u32, world: &WorldData) -> Result<()> {
         // For each level, we have 3^level tiles per side
         let tiles_per_side = 3u32.pow(level);
-        println!("Building level {} with {}x{} tiles...", level, tiles_per_side, tiles_per_side);
+        println!("Building level {} with {}x{} tiles in parallel...", level, tiles_per_side, tiles_per_side);
         
-        for row in 0..tiles_per_side {
-            for col in 0..tiles_per_side {
-                self.build_single_tile(level, row, col, tiles_per_side, world)?;
-            }
+        // Create a vector of all tile coordinates to process
+        let total_tiles = tiles_per_side * tiles_per_side;
+        let tile_coords: Vec<(u32, u32)> = (0..tiles_per_side)
+            .flat_map(|row| (0..tiles_per_side).map(move |col| (row, col)))
+            .collect();
+        
+        // Process tiles in parallel
+        let results: Vec<Result<()>> = tile_coords.par_iter()
+            .map(|&(row, col)| {
+                // We need to clone the config for each parallel task
+                let config_clone = self.config.clone();
+                let index = row * tiles_per_side + col + 1;
+                println!("  Generating tile {}/{}: level={}, row={}, col={}...", 
+                    index, total_tiles, level, row, col);
+                
+                // Configure tile settings
+                let mut viz_config = config_clone.viz_config.clone();
+                viz_config.tile = Some(TileConfig {
+                    rows: tiles_per_side,
+                    columns: tiles_per_side,
+                    row_index: row,
+                    column_index: col,
+                    overlap_pixels: config_clone.tile_overlap,
+                });
+                
+                // Render the tile using the pre-processed world data
+                let image = render_tile(world, &viz_config)
+                    .with_context(|| format!("Failed to render tile: level={}, row={}, col={}", level, row, col))?;
+                
+                // Save the image
+                let output_path = self.get_tile_filename(level, row, col);
+                image.save(&output_path)
+                    .with_context(|| format!("Failed to save tile to {:?}", output_path))?;
+                
+                Ok(())
+            })
+            .collect();
+        
+        // Check if any tile generation failed
+        for result in results {
+            result?;
         }
         
         Ok(())

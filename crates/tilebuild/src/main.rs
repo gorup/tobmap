@@ -88,7 +88,7 @@ fn main() -> Result<()> {
     // Generate tiles
     let tile_builder = TileBuilder::new(config);
     println!("Generating tiles in {:?}...", opt.output_dir);
-    println!("This may take a while but will be faster with our optimized approach!");
+    println!("This may take a while but will be faster with our parallel processing approach!");
     tile_builder.build_all_tiles(&graph, &location)?;
     
     println!("Done!");
