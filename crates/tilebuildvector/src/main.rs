@@ -53,67 +53,67 @@ fn main() -> anyhow::Result<()> {
     // Define our ten tile levels (one for each priority)
     let levels = vec![
         TileLevel {
-            name: "level0".to_string(),
+            name: "level1".to_string(),  // Changed from level0 to match S2 cell level
             s2_cell_level: 1,
             min_priority: 10,
             max_priority: 10,
         },
         TileLevel {
-            name: "level1".to_string(),
+            name: "level2".to_string(),  // Already matches S2 cell level
             s2_cell_level: 2,
             min_priority: 9,
             max_priority: 9,
         },
         TileLevel {
-            name: "level2".to_string(),
+            name: "level3".to_string(),  // Already matches S2 cell level
             s2_cell_level: 3,
             min_priority: 8,
             max_priority: 8,
         },
         TileLevel {
-            name: "level3".to_string(),
+            name: "level4".to_string(),  // Changed from level3 to match S2 cell level
             s2_cell_level: 4,
             min_priority: 7,
             max_priority: 7,
         },
         TileLevel {
-            name: "level4".to_string(),
+            name: "level5".to_string(),  // Changed from level4 to match S2 cell level
             s2_cell_level: 5,
             min_priority: 6,
             max_priority: 6,
         },
         TileLevel {
-            name: "level5".to_string(),
+            name: "level6".to_string(),  // Changed from level5 to match S2 cell level
             s2_cell_level: 6,
             min_priority: 5,
             max_priority: 5,
         },
         TileLevel {
-            name: "level6".to_string(),
+            name: "level7".to_string(),  // Changed from level6 to match S2 cell level
             s2_cell_level: 7,
             min_priority: 4,
             max_priority: 4,
         },
         TileLevel {
-            name: "level7".to_string(),
+            name: "level8".to_string(),  // Changed from level7 to match S2 cell level
             s2_cell_level: 8,
             min_priority: 3,
             max_priority: 3,
         },
         TileLevel {
-            name: "level8".to_string(),
+            name: "level9".to_string(),  // Changed from level8 to match S2 cell level
             s2_cell_level: 9,
             min_priority: 2,
             max_priority: 2,
         },
         TileLevel {
-            name: "level9".to_string(),
+            name: "level10".to_string(), // Changed from level9 to match S2 cell level
             s2_cell_level: 10,
             min_priority: 1,
             max_priority: 1,
         },
         TileLevel {
-            name: "level10".to_string(),
+            name: "level11".to_string(), // Changed from level10 to match S2 cell level
             s2_cell_level: 11,
             min_priority: 0,
             max_priority: 0,
