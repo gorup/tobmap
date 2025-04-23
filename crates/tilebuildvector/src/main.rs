@@ -8,7 +8,7 @@ use flatbuffers::root;
 use s2::{cell::Cell, cellid::CellID};
 use rayon::prelude::*;
 use log::{info, warn, debug};
-use tilebuildraw::proto::tobmapdata::{S2CellData, Vertex, Edge};
+use tilebuildvector::proto::tobmapdata::{S2CellData, Vertex, Edge};
 use schema::graph_generated::tobmapgraph;
 use anyhow::Context;
 
@@ -40,28 +40,83 @@ struct TileLevel {
     max_priority: u8,
 }
 
+// Convert priority to zoom level (0-10)
+fn priority_to_zoom(priority: u8) -> u8 {
+    // Inverting priority (10 is highest priority, 0 is lowest)
+    // So zoom 0 is highest priority, zoom 10 is lowest
+    10 - priority.min(10)
+}
+
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Define our three tile levels
+    // Define our ten tile levels (one for each priority)
     let levels = vec![
         TileLevel {
-            name: "high".to_string(),
+            name: "level0".to_string(),
             s2_cell_level: 1,
-            min_priority: 9,
+            min_priority: 10,
             max_priority: 10,
         },
         TileLevel {
-            name: "medium".to_string(),
-            s2_cell_level: 4,
-            min_priority: 6,
+            name: "level1".to_string(),
+            s2_cell_level: 2,
+            min_priority: 9,
+            max_priority: 9,
+        },
+        TileLevel {
+            name: "level2".to_string(),
+            s2_cell_level: 3,
+            min_priority: 8,
             max_priority: 8,
         },
         TileLevel {
-            name: "low".to_string(),
-            s2_cell_level: 7,
-            min_priority: 0,
+            name: "level3".to_string(),
+            s2_cell_level: 4,
+            min_priority: 7,
+            max_priority: 7,
+        },
+        TileLevel {
+            name: "level4".to_string(),
+            s2_cell_level: 5,
+            min_priority: 6,
+            max_priority: 6,
+        },
+        TileLevel {
+            name: "level5".to_string(),
+            s2_cell_level: 6,
+            min_priority: 5,
             max_priority: 5,
+        },
+        TileLevel {
+            name: "level6".to_string(),
+            s2_cell_level: 7,
+            min_priority: 4,
+            max_priority: 4,
+        },
+        TileLevel {
+            name: "level7".to_string(),
+            s2_cell_level: 8,
+            min_priority: 3,
+            max_priority: 3,
+        },
+        TileLevel {
+            name: "level8".to_string(),
+            s2_cell_level: 9,
+            min_priority: 2,
+            max_priority: 2,
+        },
+        TileLevel {
+            name: "level9".to_string(),
+            s2_cell_level: 10,
+            min_priority: 1,
+            max_priority: 1,
+        },
+        TileLevel {
+            name: "level10".to_string(),
+            s2_cell_level: 11,
+            min_priority: 0,
+            max_priority: 0,
         },
     ];
 
@@ -113,10 +168,6 @@ fn generate_tiles_for_level(
 ) -> anyhow::Result<()> {
     info!("Generating tiles for level: {}", level.name);
     
-    // Create output directory for this level
-    let level_dir = output_dir.join(&level.name);
-    fs::create_dir_all(&level_dir)?;
-
     // Build a map of edge index to edge description
     let mut edge_descriptions = HashMap::new();
     if let Some(desc_vec) = description_blob.edge_descriptions() {
@@ -213,8 +264,14 @@ fn generate_tiles_for_level(
             }
         }
 
+        // Convert priority to zoom level
+        let zoom = priority_to_zoom(level.min_priority);
+
         // Write tile to file
-        let tile_path = level_dir.join(format!("tile_{}.pb", cell_id));
+        let x = cell_id & 0xFFFF; // Example calculation for x
+        let y = (cell_id >> 16) & 0xFFFF; // Example calculation for y
+        let tile_path = output_dir.join(format!("{}/{}/{}/tile_{}.pb", zoom, x, y, cell_id));
+        fs::create_dir_all(tile_path.parent().unwrap())?;
         let mut file = File::create(tile_path)?;
         let encoded = tile.encode_to_vec();
         file.write_all(&encoded)?;

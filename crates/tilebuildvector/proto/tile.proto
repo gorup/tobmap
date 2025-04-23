@@ -17,7 +17,7 @@ message Vertex {
 
 message Edge {
   // At least two! Cell ids, as specific as possible
-  repeated uint64 points = 1;
+  repeated uint64 points = 1 [packed = true];
   uint32 priority = 2; // between 0 and 10, 
   repeated string street_names = 3; // street names
   bool is_oneway = 4; // true if one way

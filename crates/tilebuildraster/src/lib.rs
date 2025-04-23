@@ -116,6 +116,7 @@ impl TileBuilder {
             row_index: row,
             column_index: col,
             overlap_pixels: self.config.tile_overlap,
+            zoom_level,
         };
         
         // Create a visualization config specific to this tile

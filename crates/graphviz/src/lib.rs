@@ -31,6 +31,12 @@ pub struct TileConfig {
     pub row_index: u32,    // Current row to render (0-indexed)
     pub column_index: u32, // Current column to render (0-indexed)
     pub overlap_pixels: u32, // Overlap between tiles to avoid edge artifacts
+    pub zoom_level: u32,   // Zoom level for web mapping (0 = whole world, higher = more detail)
+}
+
+/// Function to generate a standardized tile filename
+pub fn get_tile_filename(zoom_level: u32, x: u32, y: u32) -> String {
+    format!("tile_z{}_x{}_y{}.png", zoom_level, x, y)
 }
 
 /// Configuration for the visualization process.
@@ -48,7 +54,7 @@ pub struct VizConfig {
     pub tile: Option<TileConfig>, // New field for tiling configuration
 }
 
-/// Pre-processed world data that can be reused across multiple tile renderings
+/// Pre-proc essed world data that can be reused across multiple tile renderings
 pub struct WorldData {
     pub node_positions: Vec<(f64, f64)>,      // Longitude, Latitude for each node
     pub edge_paths: Vec<Vec<(f64, f64)>>,     // Paths of points for each edge
