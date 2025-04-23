@@ -267,10 +267,12 @@ fn generate_tiles_for_level(
         // Convert priority to zoom level
         let zoom = priority_to_zoom(level.min_priority);
 
-        // Write tile to file
-        let x = cell_id & 0xFFFF; // Example calculation for x
-        let y = (cell_id >> 16) & 0xFFFF; // Example calculation for y
-        let tile_path = output_dir.join(format!("{}/{}/{}/tile_{}.pb", zoom, x, y, cell_id));
+        // Convert cell ID to token for filename
+        let cell = Cell::from(CellID(*cell_id));
+        let token = cell.id.to_token();
+
+        // Write tile to file using token instead of raw cell ID
+        let tile_path = output_dir.join(format!("level_{}/tile_{}.pb", zoom, token));
         fs::create_dir_all(tile_path.parent().unwrap())?;
         let mut file = File::create(tile_path)?;
         let encoded = tile.encode_to_vec();
