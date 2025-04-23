@@ -19,7 +19,7 @@ struct Opt {
     location_file: PathBuf,
 
     /// Output directory
-    #[clap(short, long, default_value = "outputs/tiles")]
+    #[clap(short, long, default_value = "outputs/tilesrastergraph")]
     output_dir: PathBuf,
 
     /// Maximum zoom level (0-based)
