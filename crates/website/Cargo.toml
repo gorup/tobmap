@@ -6,3 +6,12 @@ edition = "2024"
 [dependencies]
 actix-web = "4.10.2"
 actix-files = "0.6.6"
+
+[[bin]]
+name = "websitevector"
+path = "src/vector.rs"
+
+
+[[bin]]
+name = "websiteraster"
+path = "src/raster.rs"

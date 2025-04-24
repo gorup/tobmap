@@ -8,7 +8,7 @@ use tilebuild::{TileBuilder, TileBuildConfig};
 use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
 
 #[derive(Parser, Debug)]
-#[clap(name = "tilebuild", about = "Generate map tiles at different zoom levels")]
+#[clap(name = "tilebuildrastergraph", about = "Generate map tiles at different zoom levels")]
 struct Opt {
     /// Path to graph.fbs file
     #[clap(short, long)]
@@ -27,11 +27,11 @@ struct Opt {
     max_zoom_level: u32,
     
     /// Tile size in pixels (longest edge)
-    #[clap(long, default_value_t = 512)]
+    #[clap(long, default_value_t = 256)]
     tile_size: u32,
     
     /// Overlap between tiles in pixels
-    #[clap(long, default_value_t = 8)]
+    #[clap(long, default_value_t = 0)]
     tile_overlap: u32,
     
     /// Path to description file

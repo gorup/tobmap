@@ -20,5 +20,5 @@ name = "tilebuild"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tilebuild"
+name = "tilebuildrastergraph"
 path = "src/main.rs"

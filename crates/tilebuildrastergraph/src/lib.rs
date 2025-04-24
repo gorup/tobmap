@@ -103,7 +103,7 @@ impl TileBuilder {
         
         Ok(())
     }
-    
+
     /// Build a single tile
     fn build_tile(&self, zoom_level: u32, row: u32, col: u32, num_tiles: u32,
         graph: &GraphBlob, location: &LocationBlob, description: &DescriptionBlob, world_data: Arc<WorldData>,
