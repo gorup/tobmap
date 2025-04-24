@@ -89,14 +89,21 @@ fn main() -> Result<()> {
     // Configure zoom levels according to requirements
     // Show vertices only for zoom levels 3+
     for level in 0..=max_zoom {
-        show_vertices[level as usize] = level >= 3;
+        show_vertices[level as usize] = false;
     }
     
     // Set minimum priority thresholds for each level
-    if max_zoom >= 0 { min_priority[0] = 8; }
-    if max_zoom >= 1 { min_priority[1] = 6; }
-    if max_zoom >= 2 { min_priority[2] = 4; }
-    if max_zoom >= 3 { min_priority[3] = 0; }
+    if max_zoom >= 0 { min_priority[0] = 10; }
+    if max_zoom >= 1 { min_priority[1] = 9; }
+    if max_zoom >= 2 { min_priority[2] = 8; }
+    if max_zoom >= 3 { min_priority[3] = 7; }
+    if max_zoom >= 4 { min_priority[4] = 6; }
+    if max_zoom >= 5 { min_priority[5] = 5; }
+    if max_zoom >= 6 { min_priority[6] = 4; }
+    if max_zoom >= 7 { min_priority[7] = 3; }
+    if max_zoom >= 8 { min_priority[8] = 2; }
+    if max_zoom >= 9 { min_priority[9] = 1; }
+    if max_zoom >= 10 { min_priority[10] = 0; }
 
     for (i, &priority) in min_priority.iter().enumerate() {
         println!("Zoom level {}: Minimum priority = {}", i, priority);

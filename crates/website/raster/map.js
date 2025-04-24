@@ -17,6 +17,12 @@ class RasterMapViewer {
         this.lastMouseY = 0;
         this.visibleTiles = new Set();
         
+        // Tile caching and management
+        this.tileCache = new Map(); // Cache for loaded tiles
+        this.maxCacheSize = 200;    // Maximum number of tiles to keep in cache
+        this.tileLoadQueue = [];    // Queue for prioritizing tile loading
+        this.tileUsageCounter = new Map(); // Track how recently tiles were used
+        
         // Initialize the map
         this.initializeControls();
         this.updateMapView();
@@ -117,6 +123,9 @@ class RasterMapViewer {
         // Track which tiles are currently visible
         const newVisibleTiles = new Set();
         
+        // Clear the tile load queue
+        this.tileLoadQueue = [];
+        
         // Draw visible tiles
         for (let x = -Math.floor(tilesInViewX / 2); x <= Math.ceil(tilesInViewX / 2); x++) {
             for (let y = -Math.floor(tilesInViewY / 2); y <= Math.ceil(tilesInViewY / 2); y++) {
@@ -135,36 +144,136 @@ class RasterMapViewer {
                 const tileId = `tile-${this.currentZoom}-${tileX}-${tileY}`;
                 newVisibleTiles.add(tileId);
                 
+                // Update usage counter for this tile
+                this.tileUsageCounter.set(tileId, Date.now());
+                
                 // Check if the tile is already rendered
                 if (!document.getElementById(tileId)) {
-                    this.createTile(tileId, tileX, tileY, x, y, offsetX, offsetY);
+                    // Add to load queue with priority based on distance from center
+                    const distance = Math.sqrt(x*x + y*y);
+                    this.tileLoadQueue.push({
+                        tileId, tileX, tileY, offsetTileX: x, offsetTileY: y, 
+                        offsetX, offsetY, distance
+                    });
                 } else {
                     // Update position for existing tile
                     const tile = document.getElementById(tileId);
                     const posX = Math.round(viewportWidth / 2 + (x * this.tileSize) - offsetX);
                     const posY = Math.round(viewportHeight / 2 + (y * this.tileSize) - offsetY);
                     tile.style.transform = `translate(${posX}px, ${posY}px)`;
+                    
+                    // If the tile was hidden, show it again
+                    if (tile.style.display === 'none') {
+                        tile.style.display = 'block';
+                    }
                 }
             }
         }
         
-        // Remove tiles that are no longer visible
+        // Handle tiles that are no longer visible
         this.visibleTiles.forEach(tileId => {
             if (!newVisibleTiles.has(tileId)) {
                 const tile = document.getElementById(tileId);
                 if (tile) {
-                    tile.remove();
+                    // Hide the tile instead of removing it completely if it's in our cache
+                    if (this.tileCache.has(tileId)) {
+                        tile.style.display = 'none';
+                    } else {
+                        tile.remove();
+                    }
                 }
             }
         });
         
         // Update the set of visible tiles
         this.visibleTiles = newVisibleTiles;
+        
+        // Load tiles in order of priority (closest to center first)
+        this.tileLoadQueue.sort((a, b) => a.distance - b.distance);
+        this.processTileQueue();
+        
+        // Manage cache size
+        this.manageCacheSize();
+    }
+    
+    processTileQueue() {
+        // Process the first few items immediately
+        const immediateLoad = Math.min(5, this.tileLoadQueue.length);
+        for (let i = 0; i < immediateLoad; i++) {
+            this.createTile(
+                this.tileLoadQueue[i].tileId,
+                this.tileLoadQueue[i].tileX,
+                this.tileLoadQueue[i].tileY,
+                this.tileLoadQueue[i].offsetTileX,
+                this.tileLoadQueue[i].offsetTileY,
+                this.tileLoadQueue[i].offsetX,
+                this.tileLoadQueue[i].offsetY
+            );
+        }
+        
+        // Process remaining tiles with delay to prevent browser from freezing
+        if (this.tileLoadQueue.length > immediateLoad) {
+            setTimeout(() => {
+                const tile = this.tileLoadQueue[immediateLoad];
+                if (tile && this.visibleTiles.has(tile.tileId)) {
+                    this.createTile(
+                        tile.tileId, tile.tileX, tile.tileY, 
+                        tile.offsetTileX, tile.offsetTileY, 
+                        tile.offsetX, tile.offsetY
+                    );
+                    
+                    // Continue processing the queue
+                    this.tileLoadQueue.splice(immediateLoad, 1);
+                    if (this.tileLoadQueue.length > immediateLoad) {
+                        this.processTileQueue();
+                    }
+                }
+            }, 10);
+        }
+    }
+    
+    manageCacheSize() {
+        // If cache exceeds max size, remove least recently used tiles
+        if (this.tileCache.size > this.maxCacheSize) {
+            // Convert to array and sort by last usage time
+            const tileEntries = Array.from(this.tileUsageCounter.entries());
+            tileEntries.sort((a, b) => a[1] - b[1]);
+            
+            // Remove oldest entries until we're back under the limit
+            const tilesToRemove = tileEntries.slice(0, this.tileCache.size - this.maxCacheSize);
+            
+            tilesToRemove.forEach(([tileId]) => {
+                // Remove from cache
+                this.tileCache.delete(tileId);
+                this.tileUsageCounter.delete(tileId);
+                
+                // If it's not visible, remove the DOM element too
+                if (!this.visibleTiles.has(tileId)) {
+                    const tile = document.getElementById(tileId);
+                    if (tile) {
+                        tile.remove();
+                    }
+                }
+            });
+        }
     }
     
     createTile(tileId, tileX, tileY, offsetTileX, offsetTileY, offsetX, offsetY) {
         const viewportWidth = this.mapContainer.clientWidth;
         const viewportHeight = this.mapContainer.clientHeight;
+        
+        // Check if we have this tile in the cache
+        if (this.tileCache.has(tileId)) {
+            const cachedTile = this.tileCache.get(tileId);
+            cachedTile.style.display = 'block';
+            
+            // Update position
+            const posX = Math.round(viewportWidth / 2 + (offsetTileX * this.tileSize) - offsetX);
+            const posY = Math.round(viewportHeight / 2 + (offsetTileY * this.tileSize) - offsetY);
+            cachedTile.style.transform = `translate(${posX}px, ${posY}px)`;
+            
+            return cachedTile;
+        }
         
         const tile = document.createElement('div');
         tile.id = tileId;
@@ -176,14 +285,19 @@ class RasterMapViewer {
         
         tile.style.transform = `translate(${posX}px, ${posY}px)`;
         
+        // Create the tile URL with cache busting parameter
+        const tileUrl = `/tile/${this.currentZoom}/${tileX}/${tileY}`;
+        
         // Set background image to the tile
-        tile.style.backgroundImage = `url('/tile/${this.currentZoom}/${tileX}/${tileY}')`;
+        tile.style.backgroundImage = `url('${tileUrl}')`;
         tile.style.backgroundSize = 'cover';
 
         // Add error handling for tile loading
         const img = new Image();
         img.onload = () => {
             tile.style.backgroundColor = 'transparent';
+            // Add to cache once successfully loaded
+            this.tileCache.set(tileId, tile);
         };
         img.onerror = () => {
             tile.style.backgroundColor = '#eee';
@@ -194,9 +308,10 @@ class RasterMapViewer {
             tile.style.fontSize = '10px';
             tile.style.color = '#999';
         };
-        img.src = `/tile/${this.currentZoom}/${tileX}/${tileY}`;
+        img.src = tileUrl;
         
         this.mapContainer.appendChild(tile);
+        return tile;
     }
 }
 
