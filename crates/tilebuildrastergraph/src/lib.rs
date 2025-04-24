@@ -113,9 +113,10 @@ impl TileBuilder {
         let tile_config = TileConfig {
             rows: num_tiles,
             columns: num_tiles,
+            tile_size: 256,
             row_index: row,
             column_index: col,
-            overlap_pixels: self.config.tile_overlap,
+            // overlap_pixels: self.config.tile_overlap,
             zoom_level,
         };
         
@@ -135,7 +136,7 @@ impl TileBuilder {
         // Save the image
         let output_path = self.config.output_dir
             .join(format!("{}", zoom_level))
-            .join(format!("{}_{}.png", row, col));
+            .join(format!("{}_{}.png", col, row));
             
         image.save_with_format(&output_path, ImageFormat::Png)
             .with_context(|| format!("Failed to save tile image to {:?}", output_path))?;

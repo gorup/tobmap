@@ -30,7 +30,7 @@ pub struct TileConfig {
     pub columns: u32,      // Total number of columns in the grid
     pub row_index: u32,    // Current row to render (0-indexed)
     pub column_index: u32, // Current column to render (0-indexed)
-    pub overlap_pixels: u32, // Overlap between tiles to avoid edge artifacts
+    pub tile_size: u32,    // Size of each tile in pixels (both width and height)
     pub zoom_level: u32,   // Zoom level for web mapping (0 = whole world, higher = more detail)
 }
 
@@ -54,7 +54,7 @@ pub struct VizConfig {
     pub tile: Option<TileConfig>, // New field for tiling configuration
 }
 
-/// Pre-proc essed world data that can be reused across multiple tile renderings
+/// Pre-processed world data that can be reused across multiple tile renderings
 pub struct WorldData {
     pub node_positions: Vec<(f64, f64)>,      // Longitude, Latitude for each node
     pub edge_paths: Vec<Vec<(f64, f64)>>,     // Paths of points for each edge
@@ -82,6 +82,28 @@ impl MapBounds {
     pub fn height(&self) -> f64 {
         self.max_lat - self.min_lat
     }
+}
+
+/// Calculate bounds for a specific tile
+pub fn calculate_tile_bounds(
+    full_bounds: &MapBounds,
+    row_index: u32,
+    column_index: u32,
+    rows: u32,
+    columns: u32,
+) -> MapBounds {
+    let tile_width = full_bounds.width() / columns as f64;
+    let tile_height = full_bounds.height() / rows as f64;
+    
+    // Calculate tile boundaries without any overlap
+    let min_lng = full_bounds.min_lng + column_index as f64 * tile_width;
+    let max_lng = full_bounds.min_lng + (column_index + 1) as f64 * tile_width;
+    
+    // Note: latitude increases northward (upward) but image y-coordinates increase downward
+    let max_lat = full_bounds.max_lat - row_index as f64 * tile_height;
+    let min_lat = full_bounds.max_lat - (row_index + 1) as f64 * tile_height;
+    
+    MapBounds { min_lat, max_lat, min_lng, max_lng }
 }
 
 /// Properties of an edge
@@ -252,16 +274,234 @@ fn get_cost_color(cost: u8) -> Rgb<u8> {
     Rgb([red, green, 0])
 }
 
-/// Simple line-rectangle intersection check (Axis-Aligned Bounding Box)
+/// Check if a line segment crosses a rectangle boundary
 fn line_crosses_bounds(x1: f64, y1: f64, x2: f64, y2: f64, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> bool {
-    // Check if both points are outside on the same side
+    // Check if both endpoints are outside on the same side
     if (x1 < min_x && x2 < min_x) || (x1 > max_x && x2 > max_x) ||
        (y1 < min_y && y2 < min_y) || (y1 > max_y && y2 > max_y) {
         return false;
     }
-    // Basic check passed, assume it might cross or be inside
-    // A more precise check (like Liang-Barsky) could be used here if needed.
-    true
+    
+    // If either endpoint is inside, the line crosses the boundary
+    if (x1 >= min_x && x1 <= max_x && y1 >= min_y && y1 <= max_y) ||
+       (x2 >= min_x && x2 <= max_x && y2 >= min_y && y2 <= max_y) {
+        return true;
+    }
+    
+    // Check intersection with each edge of the rectangle
+    
+    // Left edge
+    if line_intersects(x1, y1, x2, y2, min_x, min_y, min_x, max_y) {
+        return true;
+    }
+    
+    // Right edge
+    if line_intersects(x1, y1, x2, y2, max_x, min_y, max_x, max_y) {
+        return true;
+    }
+    
+    // Bottom edge
+    if line_intersects(x1, y1, x2, y2, min_x, min_y, max_x, min_y) {
+        return true;
+    }
+    
+    // Top edge
+    if line_intersects(x1, y1, x2, y2, min_x, max_y, max_x, max_y) {
+        return true;
+    }
+    
+    false
+}
+
+/// Check if two line segments intersect
+fn line_intersects(x1: f64, y1: f64, x2: f64, y2: f64, x3: f64, y3: f64, x4: f64, y4: f64) -> bool {
+    // Calculate denominators
+    let d = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+    
+    // Lines are parallel if d is 0
+    if d.abs() < 1e-10 {
+        return false;
+    }
+    
+    // Calculate line intersection parameters
+    let ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / d;
+    let ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / d;
+    
+    // Check if intersection is within both line segments
+    ua >= 0.0 && ua <= 1.0 && ub >= 0.0 && ub <= 1.0
+}
+
+/// Compute outcode for Cohen-Sutherland algorithm
+fn compute_outcode(x: f64, y: f64, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> u8 {
+    let mut code = 0;
+    
+    if x < min_x {
+        code |= 1; // Left
+    } else if x > max_x {
+        code |= 2; // Right
+    }
+    
+    if y < min_y {
+        code |= 4; // Bottom
+    } else if y > max_y {
+        code |= 8; // Top
+    }
+    
+    code
+}
+
+/// Helper function to determine if an edge belongs to a specific tile
+fn edge_belongs_to_tile(
+    path: &[(f64, f64)], 
+    tile_bounds: &MapBounds,
+    tile_row: u32,
+    tile_col: u32,
+    total_rows: u32,
+    total_cols: u32
+) -> bool {
+    // If the path is empty, it doesn't belong to any tile
+    if path.is_empty() {
+        return false;
+    }
+    
+    // For edges, we assign them to a specific tile based on their midpoint
+    // This ensures each edge only appears in one tile
+    
+    // Find the midpoint of the edge path
+    let midpoint_idx = path.len() / 2;
+    let (mid_lng, mid_lat) = path[midpoint_idx];
+    
+    // Calculate which tile this midpoint belongs to
+    let normalized_lng = (mid_lng - tile_bounds.min_lng) / tile_bounds.width();
+    let normalized_lat = (tile_bounds.max_lat - mid_lat) / tile_bounds.height();
+    
+    let edge_tile_col = (normalized_lng * total_cols as f64).floor() as u32;
+    let edge_tile_row = (normalized_lat * total_rows as f64).floor() as u32;
+    
+    // The edge belongs to this tile if its midpoint is in this tile
+    edge_tile_col == tile_col && edge_tile_row == tile_row
+}
+
+/// Helper function to determine if an edge should be rendered in a specific tile
+/// This ensures edges that cross tile boundaries are rendered in both tiles
+fn edge_visible_in_tile(
+    path: &[(f64, f64)], 
+    tile_bounds: &MapBounds,
+) -> bool {
+    // If the path is empty, it's not visible
+    if path.is_empty() {
+        return false;
+    }
+    
+    // Check if any segment of the edge intersects with the tile boundaries
+    for i in 0..path.len() - 1 {
+        let (p1_lng, p1_lat) = path[i];
+        let (p2_lng, p2_lat) = path[i+1];
+        
+        // If either endpoint is in bounds, the edge is visible
+        let p1_in_bounds = p1_lng >= tile_bounds.min_lng && p1_lng <= tile_bounds.max_lng && 
+                           p1_lat >= tile_bounds.min_lat && p1_lat <= tile_bounds.max_lat;
+        let p2_in_bounds = p2_lng >= tile_bounds.min_lng && p2_lng <= tile_bounds.max_lng && 
+                           p2_lat >= tile_bounds.min_lat && p2_lat <= tile_bounds.max_lat;
+        
+        if p1_in_bounds || p2_in_bounds {
+            return true;
+        }
+        
+        // Check if the line segment crosses any of the tile boundaries
+        if line_crosses_bounds(
+            p1_lng, p1_lat, p2_lng, p2_lat,
+            tile_bounds.min_lng, tile_bounds.min_lat, tile_bounds.max_lng, tile_bounds.max_lat
+        ) {
+            return true;
+        }
+    }
+    
+    // No part of the edge is visible in this tile
+    false
+}
+
+/// Helper function to determine which tile an edge belongs to based on its center point
+fn get_edge_tile(
+    path: &[(f64, f64)], 
+    full_bounds: &MapBounds,
+    rows: u32,
+    columns: u32
+) -> (u32, u32) {
+    // If the path is empty, default to 0,0
+    if path.is_empty() {
+        return (0, 0);
+    }
+    
+    // Find the center point of the edge path (average of all points)
+    let mut center_lng = 0.0;
+    let mut center_lat = 0.0;
+    
+    for &(lng, lat) in path {
+        center_lng += lng;
+        center_lat += lat;
+    }
+    
+    center_lng /= path.len() as f64;
+    center_lat /= path.len() as f64;
+    
+    // Calculate which tile this center belongs to
+    let normalized_lng = (center_lng - full_bounds.min_lng) / full_bounds.width();
+    let normalized_lat = (full_bounds.max_lat - center_lat) / full_bounds.height();
+    
+    // Ensure the values are in valid range [0, 1)
+    let clamped_lng = normalized_lng.max(0.0).min(0.9999);
+    let clamped_lat = normalized_lat.max(0.0).min(0.9999);
+    
+    let column = (clamped_lng * columns as f64).floor() as u32;
+    let row = (clamped_lat * rows as f64).floor() as u32;
+    
+    (row, column)
+}
+
+/// Helper function to determine which tile a node belongs to
+fn get_node_tile(
+    position: &(f64, f64),
+    full_bounds: &MapBounds,
+    rows: u32,
+    columns: u32
+) -> (u32, u32) {
+    let (lng, lat) = *position;
+    
+    // Calculate which tile this node belongs to
+    let normalized_lng = (lng - full_bounds.min_lng) / full_bounds.width();
+    let normalized_lat = (full_bounds.max_lat - lat) / full_bounds.height();
+    
+    // Ensure the values are in valid range [0, 1)
+    let clamped_lng = normalized_lng.max(0.0).min(0.9999);
+    let clamped_lat = normalized_lat.max(0.0).min(0.9999);
+    
+    let column = (clamped_lng * columns as f64).floor() as u32;
+    let row = (clamped_lat * rows as f64).floor() as u32;
+    
+    (row, column)
+}
+
+/// Helper function to determine if a node belongs to a specific tile
+fn node_belongs_to_tile(
+    position: &(f64, f64), 
+    tile_bounds: &MapBounds,
+    tile_row: u32,
+    tile_col: u32,
+    total_rows: u32,
+    total_cols: u32
+) -> bool {
+    let (lng, lat) = *position;
+    
+    // Calculate which tile this node belongs to
+    let normalized_lng = (lng - tile_bounds.min_lng) / tile_bounds.width();
+    let normalized_lat = (tile_bounds.max_lat - lat) / tile_bounds.height();
+    
+    let node_tile_col = (normalized_lng * total_cols as f64).floor() as u32;
+    let node_tile_row = (normalized_lat * total_rows as f64).floor() as u32;
+    
+    // The node belongs to this tile if it falls within this tile's area
+    node_tile_col == tile_col && node_tile_row == tile_row
 }
 
 /// Pre-process graph data into reusable WorldData structure
@@ -336,13 +576,28 @@ pub fn process_world_data(
         max_lng,
     };
 
-    // Calculate full image dimensions
-    let aspect_ratio = bounds.width() / bounds.height();
-    let (full_img_width, full_img_height) = if aspect_ratio > 1.0 {
-        (max_size, (max_size as f64 / aspect_ratio) as u32)
-    } else {
-        ((max_size as f64 * aspect_ratio) as u32, max_size)
+    // Calculate the geographic center
+    let center_lng = (min_lng + max_lng) / 2.0;
+    let center_lat = (min_lat + max_lat) / 2.0;
+    
+    // Calculate data dimensions
+    let data_width = max_lng - min_lng;
+    let data_height = max_lat - min_lat;
+    
+    // Use the larger dimension to ensure the data is centered and doesn't get stretched
+    let max_dimension = data_width.max(data_height);
+    
+    // Create square bounds centered around the data center
+    let square_bounds = MapBounds {
+        min_lng: center_lng - max_dimension / 2.0,
+        max_lng: center_lng + max_dimension / 2.0,
+        min_lat: center_lat - max_dimension / 2.0,
+        max_lat: center_lat + max_dimension / 2.0,
     };
+
+    // Calculate full image dimensions - always square for proper tiling
+    let full_img_width = max_size;
+    let full_img_height = max_size;
 
     // Pre-process all edge paths and properties
     let mut edge_paths = Vec::with_capacity(edges.len());
@@ -425,7 +680,7 @@ pub fn process_world_data(
         node_positions,
         edge_paths,
         edge_properties,
-        full_bounds: bounds,
+        full_bounds: square_bounds, // Use the square bounds
         full_dimensions: (full_img_width, full_img_height),
         nodes_count: nodes.len(),
         edges_count: edges.len(),
@@ -477,38 +732,17 @@ pub fn render_tile(
         }
 
         // Calculate the geographic bounds for this specific tile
-        let tile_width = world.full_bounds.width() / tile.columns as f64;
-        let tile_height = world.full_bounds.height() / tile.rows as f64;
+        bounds = calculate_tile_bounds(
+            &world.full_bounds, 
+            tile.row_index, 
+            tile.column_index, 
+            tile.rows, 
+            tile.columns
+        );
 
-        // Calculate actual tile bounds with overlap
-        let overlap_lng = (tile.overlap_pixels as f64 / world.full_dimensions.0 as f64) * world.full_bounds.width();
-        let overlap_lat = (tile.overlap_pixels as f64 / world.full_dimensions.1 as f64) * world.full_bounds.height();
-
-        // Update bounds for this specific tile (with overlap)
-        bounds.min_lng = world.full_bounds.min_lng + tile.column_index as f64 * tile_width 
-            - (if tile.column_index > 0 { overlap_lng } else { 0.0 });
-        bounds.max_lng = world.full_bounds.min_lng + (tile.column_index + 1) as f64 * tile_width 
-            + (if tile.column_index + 1 < tile.columns { overlap_lng } else { 0.0 });
-        
-        // Note: latitude increases northward (upward) but image y-coordinates increase downward
-        bounds.max_lat = world.full_bounds.max_lat - tile.row_index as f64 * tile_height 
-            + (if tile.row_index > 0 { overlap_lat } else { 0.0 });
-        bounds.min_lat = world.full_bounds.max_lat - (tile.row_index + 1) as f64 * tile_height 
-            - (if tile.row_index + 1 < tile.rows { overlap_lat } else { 0.0 });
-
-        // Calculate tile image dimensions - keep each tile the same size regardless of zoom level
-        // Don't divide by number of tiles; instead use the same image dimensions for each tile
-        img_width = world.full_dimensions.0;
-        img_height = world.full_dimensions.1;
-        
-        // Add overlap pixels if needed
-        if tile.overlap_pixels > 0 {
-            img_width += (if tile.column_index > 0 { tile.overlap_pixels } else { 0 }) + 
-                (if tile.column_index + 1 < tile.columns { tile.overlap_pixels } else { 0 });
-            
-            img_height += (if tile.row_index > 0 { tile.overlap_pixels } else { 0 }) + 
-                (if tile.row_index + 1 < tile.rows { tile.overlap_pixels } else { 0 });
-        }
+        // Set dimensions for the tile - same size for all tiles
+        img_width = tile.tile_size;
+        img_height = tile.tile_size;
     }
 
     // Create an empty white image
@@ -522,10 +756,17 @@ pub fn render_tile(
         *pixel = white;
     }
 
+    // Calculate the aspect ratio of the geographic bounds
+    let bounds_width = bounds.width();
+    let bounds_height = bounds.height();
+    
     // Helper function to convert lat/lng to image coordinates
+    // Maps geographic coordinates to image pixels in a consistent way across all tiles
     let to_img_coords = |lng: f64, lat: f64| -> (f32, f32) {
+        // Direct linear mapping from geographic coordinates to pixel coordinates
+        // This ensures no stretching and no whitespace when tiles are placed together
         let x = (lng - bounds.min_lng) / bounds.width() * img_width as f64;
-        // Note: y-axis is inverted (0 at top)
+        // Note: y-axis is inverted (0 at top, increases downward)
         let y = (bounds.max_lat - lat) / bounds.height() * img_height as f64;
         (x as f32, y as f32)
     };
@@ -538,7 +779,7 @@ pub fn render_tile(
     // Arrow size for direction indicators (relative to edge width)
     let arrow_size = 6.0 * base_edge_width.max(1.0);
 
-    // Add edges to image
+    // Draw edges
     for (i, (path, props)) in world.edge_paths.iter().zip(world.edge_properties.iter()).enumerate() {
         if path.is_empty() {
             continue; // Skip edges with empty paths
@@ -547,10 +788,28 @@ pub fn render_tile(
         // Get the edge priority as an integer
         let edge_priority = props.priority as usize;
         
-        // Fixed logic: Show edges with priority >= min_priority
-        // info!("Edge {}: Priority {}, Min Priority {}", i, edge_priority, min_priority);
+        // Skip edges with priority < min_priority
         if min_priority > 0 && edge_priority < min_priority {
             continue;
+        }
+
+        // Check if this edge is visible in the current tile
+        let mut segment_visible = false;
+        for j in 0..path.len() - 1 {
+            let (p1_lng, p1_lat) = path[j];
+            let (p2_lng, p2_lat) = path[j+1];
+            
+            // Check if segment is potentially visible
+            if is_in_bounds(p1_lng, p1_lat) || is_in_bounds(p2_lng, p2_lat) || 
+               line_crosses_bounds(p1_lng, p1_lat, p2_lng, p2_lat, 
+                   bounds.min_lng, bounds.min_lat, bounds.max_lng, bounds.max_lat) {
+                segment_visible = true;
+                break;
+            }
+        }
+        
+        if !segment_visible {
+            continue; // Skip edges not visible in this tile
         }
 
         // Determine if this is the highlighted edge
@@ -559,66 +818,60 @@ pub fn render_tile(
         // Set edge color and width
         let color = if is_highlighted { yellow } else { props.color };
         let width = if is_highlighted {
-            highlight_edge_width.unwrap_or(base_edge_width * 2.0 * edge_priority as f32)
+            highlight_edge_width.unwrap_or(base_edge_width * 2.0)
         } else {
-            base_edge_width
+            base_edge_width * (1.0 + edge_priority as f32 * 0.5).min(3.0)
         };
 
         // Draw segments of the path
-        let mut last_segment_visible = false;
+        let mut last_visible_segment_end = None;
+        
         for j in 0..path.len() - 1 {
             let (p1_lng, p1_lat) = path[j];
             let (p2_lng, p2_lat) = path[j+1];
 
-            // Check if segment is potentially visible
-            let p1_in_bounds = is_in_bounds(p1_lng, p1_lat);
-            let p2_in_bounds = is_in_bounds(p2_lng, p2_lat);
-
-            // Draw segment if visible or crossing bounds
-            if p1_in_bounds || p2_in_bounds || line_crosses_bounds(
-                p1_lng, p1_lat, p2_lng, p2_lat, 
-                bounds.min_lng, bounds.min_lat, bounds.max_lng, bounds.max_lat
-            ) {
+            // Check if segment crosses the tile bounds
+            if is_in_bounds(p1_lng, p1_lat) || is_in_bounds(p2_lng, p2_lat) || 
+               line_crosses_bounds(p1_lng, p1_lat, p2_lng, p2_lat, 
+                   bounds.min_lng, bounds.min_lat, bounds.max_lng, bounds.max_lat) {
+                
+                // Convert to image coordinates
                 let (x1, y1) = to_img_coords(p1_lng, p1_lat);
                 let (x2, y2) = to_img_coords(p2_lng, p2_lat);
 
                 draw_thick_line_segment_mut(&mut image, (x1, y1), (x2, y2), color, width);
-                last_segment_visible = true;
-            } else {
-                last_segment_visible = false;
+                last_visible_segment_end = Some((x2, y2));
             }
         }
 
-        // Draw arrow head for one-way edges at the end of the path if visible
-        if !props.backwards_allowed && path.len() >= 2 && last_segment_visible {
-            let (p_last_lng, p_last_lat) = path[path.len() - 1];
-            let (p_second_last_lng, p_second_last_lat) = path[path.len() - 2];
-
-            if is_in_bounds(p_last_lng, p_last_lat) || is_in_bounds(p_second_last_lng, p_second_last_lat) {
-                let (x_last, y_last) = to_img_coords(p_last_lng, p_last_lat);
-                let (x_second_last, y_second_last) = to_img_coords(p_second_last_lng, p_second_last_lat);
-
-                let dx = x_last - x_second_last;
-                let dy = y_last - y_second_last;
-                let len_sq = dx*dx + dy*dy;
-
-                if len_sq > 0.01 { // Avoid drawing arrows on zero-length segments
-                    // Calculate arrow base position slightly back from the end point
-                    let len = len_sq.sqrt();
-                    let arrow_offset = (arrow_size * 1.5).min(len * 0.4);
-
-                    let arrow_base_x = x_last - dx * arrow_offset / len;
-                    let arrow_base_y = y_last - dy * arrow_offset / len;
-
-                    draw_arrow_head(&mut image, (arrow_base_x, arrow_base_y), (x_last, y_last), color, arrow_size, width);
+        // Draw arrow head for one-way edges if the end of the path is visible
+        if !props.backwards_allowed && path.len() >= 2 {
+            // Only draw arrow if we've found visible segments
+            if let Some((x_last, y_last)) = last_visible_segment_end {
+                let (p_last_lng, p_last_lat) = path[path.len() - 1];
+                let (p_second_last_lng, p_second_last_lat) = path[path.len() - 2];
+                
+                if is_in_bounds(p_last_lng, p_last_lat) {
+                    let (x_end, y_end) = to_img_coords(p_last_lng, p_last_lat);
+                    let (x_before, y_before) = to_img_coords(p_second_last_lng, p_second_last_lat);
+                    
+                    let dx = x_end - x_before;
+                    let dy = y_end - y_before;
+                    let len_sq = dx*dx + dy*dy;
+                    
+                    if len_sq > 0.01 { // Avoid drawing arrows on zero-length segments
+                        // Draw the arrow head
+                        draw_arrow_head(&mut image, (x_before, y_before), (x_end, y_end), color, arrow_size, width);
+                    }
                 }
             }
         }
     }
 
-    // Add nodes to image as circles only if node_size is Some (not based on value being zero)
+    // Add nodes to image as circles only if node_size is Some
     if let Some(node_size) = node_size {
-        for (i, &(lng, lat)) in world.node_positions.iter().enumerate() {
+        for &(lng, lat) in &world.node_positions {
+            // Only render nodes that are within this tile's bounds
             if is_in_bounds(lng, lat) {
                 let (x, y) = to_img_coords(lng, lat);
                 draw_filled_circle_mut(&mut image, (x as i32, y as i32), node_size as i32, gray);

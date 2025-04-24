@@ -179,7 +179,7 @@ class RasterMapViewer {
         // Set background image to the tile
         tile.style.backgroundImage = `url('/tile/${this.currentZoom}/${tileX}/${tileY}')`;
         tile.style.backgroundSize = 'cover';
-        
+
         // Add error handling for tile loading
         const img = new Image();
         img.onload = () => {

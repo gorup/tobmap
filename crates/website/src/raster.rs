@@ -16,8 +16,8 @@ async fn get_tile(path: web::Path<(u32, u32, u32)>) -> impl Responder {
         return HttpResponse::NotFound().body("Zoom level out of range");
     }
     
-    let tile_path = format!("outputs/tilesrastergraph/{}/{}_{}.png", level, y, x);
-    
+    let tile_path = format!("outputs/tilesrastergraph/{}/{}_{}.png", level, x, y);
+
     // Check if file exists
     if Path::new(&tile_path).exists() {
         // Read file contents

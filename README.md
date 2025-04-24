@@ -36,3 +36,4 @@ Crazy!
 - Bit shifting was weird, I wanted right most and it did MSB, idk maybe im the weird one tho
 - I said to make a blob where we have more info about the edges and their points, but it still only grabbed start and end even though we had all of the intermediate point data available (curved roads are just sequences of points)
 - For snapping, 2 levels, outer is for a file, inner is within a file so you can quickly get to a L8 cell, then within that L8 cell we have the cell ids and their locations - it used the L8 Cell id for all edges within that cell for some reason!
+- could NOT figure out tiling haha, either stretched or centered w/ tons of whitespace
