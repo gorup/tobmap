@@ -1,5 +1,5 @@
 class RasterMapViewer {
-    constructor() {
+    constructor(options = {}) {
         this.mapContainer = document.getElementById('map');
         this.zoomInButton = document.getElementById('zoom-in');
         this.zoomOutButton = document.getElementById('zoom-out');
@@ -17,11 +17,20 @@ class RasterMapViewer {
         this.lastMouseY = 0;
         this.visibleTiles = new Set();
         
+        // GPS center configuration (center of level 0 tile)
+        this.centerGPS = options.centerGPS || { lat: 0, lng: 0 };
+        
         // Tile caching and management
         this.tileCache = new Map(); // Cache for loaded tiles
         this.maxCacheSize = 200;    // Maximum number of tiles to keep in cache
         this.tileLoadQueue = [];    // Queue for prioritizing tile loading
         this.tileUsageCounter = new Map(); // Track how recently tiles were used
+        
+        // Point selection state
+        this.startPoint = null;
+        this.endPoint = null;
+        this.startMarker = null;
+        this.endMarker = null;
         
         // Initialize the map
         this.initializeControls();
@@ -38,10 +47,12 @@ class RasterMapViewer {
         
         // Pan controls
         this.mapContainer.addEventListener('mousedown', (e) => {
-            this.isDragging = true;
-            this.lastMouseX = e.clientX;
-            this.lastMouseY = e.clientY;
-            this.mapContainer.style.cursor = 'grabbing';
+            if (e.button === 0) { // Left click only for panning
+                this.isDragging = true;
+                this.lastMouseX = e.clientX;
+                this.lastMouseY = e.clientY;
+                this.mapContainer.style.cursor = 'grabbing';
+            }
         });
         
         document.addEventListener('mousemove', (e) => {
@@ -74,8 +85,147 @@ class RasterMapViewer {
             }
         });
         
+        // Add right-click event for point selection
+        this.mapContainer.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            
+            // Get click coordinates relative to map
+            const rect = this.mapContainer.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+            
+            // Convert to map coordinates
+            const mapX = this.centerX + (clickX - this.mapContainer.clientWidth / 2);
+            const mapY = this.centerY + (clickY - this.mapContainer.clientHeight / 2);
+            
+            // Select start or end point
+            if (!this.startPoint) {
+                this.startPoint = { x: mapX, y: mapY };
+                this.addMarker(clickX, clickY, 'start');
+                console.log('Start point selected');
+            } else if (!this.endPoint) {
+                this.endPoint = { x: mapX, y: mapY };
+                this.addMarker(clickX, clickY, 'end');
+                console.log('End point selected');
+                
+                // Log coordinates
+                this.logCoordinates();
+            } else {
+                // Reset and start over
+                this.removeMarkers();
+                this.startPoint = { x: mapX, y: mapY };
+                this.endPoint = null;
+                this.addMarker(clickX, clickY, 'start');
+                console.log('New start point selected');
+            }
+        });
+        
         // Set initial cursor
         this.mapContainer.style.cursor = 'grab';
+    }
+    
+    addMarker(x, y, type) {
+        // Remove existing marker if it exists
+        if (type === 'start' && this.startMarker) {
+            this.mapContainer.removeChild(this.startMarker);
+            this.startMarker = null;
+        } else if (type === 'end' && this.endMarker) {
+            this.mapContainer.removeChild(this.endMarker);
+            this.endMarker = null;
+        }
+        
+        // Create new marker
+        const marker = document.createElement('div');
+        marker.style.position = 'absolute';
+        marker.style.width = '12px';
+        marker.style.height = '12px';
+        marker.style.borderRadius = '50%';
+        marker.style.left = `${x - 6}px`;
+        marker.style.top = `${y - 6}px`;
+        marker.style.zIndex = '1000';
+        
+        if (type === 'start') {
+            marker.style.backgroundColor = 'green';
+            this.startMarker = marker;
+        } else {
+            marker.style.backgroundColor = 'red';
+            this.endMarker = marker;
+        }
+        
+        this.mapContainer.appendChild(marker);
+    }
+    
+    removeMarkers() {
+        if (this.startMarker) {
+            this.mapContainer.removeChild(this.startMarker);
+            this.startMarker = null;
+        }
+        if (this.endMarker) {
+            this.mapContainer.removeChild(this.endMarker);
+            this.endMarker = null;
+        }
+        this.startPoint = null;
+        this.endPoint = null;
+    }
+    
+    logCoordinates() {
+        if (this.startPoint && this.endPoint) {
+            // Convert map coordinates to GPS coordinates
+            const startGPS = this.convertToGPS(this.startPoint.x, this.startPoint.y);
+            const endGPS = this.convertToGPS(this.endPoint.x, this.endPoint.y);
+            
+            console.log('Start Point:', startGPS);
+            console.log('End Point:', endGPS);
+            console.log(`Distance: ${this.calculateDistance(startGPS, endGPS).toFixed(2)} km`);
+        }
+    }
+    
+    // Add a method to update the center GPS coordinates
+    setCenterGPS(lat, lng) {
+        this.centerGPS = { lat, lng };
+        console.log(`Map center GPS coordinates set to: ${lat}, ${lng}`);
+    }
+    
+    convertToGPS(mapX, mapY) {
+        // Convert pixel coordinates to tile coordinates
+        const tileX = mapX / this.tileSize;
+        const tileY = mapY / this.tileSize;
+        
+        // Convert tile coordinates to normalized coordinates (0-1)
+        const normalizedX = tileX / Math.pow(2, this.currentZoom);
+        const normalizedY = tileY / Math.pow(2, this.currentZoom);
+        
+        // Convert normalized coordinates to longitude/latitude relative to the center point
+        // Using the provided center GPS coordinates as reference
+        const longitude = (normalizedX - 0.5) * 360 + this.centerGPS.lng;
+        
+        // Calculate latitude using Mercator projection formula
+        // (adjusted to use the center point as reference)
+        const mercatorY = (normalizedY - 0.5) * 2 * Math.PI;
+        const latitude = (2 * Math.atan(Math.exp(-mercatorY)) - Math.PI/2) * (180/Math.PI) + this.centerGPS.lat;
+        
+        return { lat: latitude, lng: longitude };
+    }
+    
+    calculateDistance(point1, point2) {
+        // Haversine formula for calculating distance between two GPS points
+        const R = 6371; // Earth's radius in km
+        const dLat = this.toRadians(point2.lat - point1.lat);
+        const dLng = this.toRadians(point2.lng - point1.lng);
+        
+        const a = 
+            Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(this.toRadians(point1.lat)) * Math.cos(this.toRadians(point2.lat)) * 
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+            
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+        
+        return distance;
+    }
+    
+    toRadians(degrees) {
+        return degrees * (Math.PI/180);
     }
     
     zoomIn() {
@@ -317,5 +467,14 @@ class RasterMapViewer {
 
 // Initialize the map viewer when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    const mapViewer = new RasterMapViewer();
+    // Initialize with default center GPS coordinates
+    // You can customize these coordinates to match your map's center at zoom level 0
+    const centerGPS = { lat: 47.303432980269626, lng: -120.80215235208065 };
+    
+    const mapViewer = new RasterMapViewer({
+        centerGPS: centerGPS
+    });
+    
+    // Example of how to set center coordinates after initialization
+    mapViewer.setCenterGPS(47.303432980269626, -120.80215235208065);
 });

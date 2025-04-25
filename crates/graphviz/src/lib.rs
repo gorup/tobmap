@@ -579,7 +579,9 @@ pub fn process_world_data(
     // Calculate the geographic center
     let center_lng = (min_lng + max_lng) / 2.0;
     let center_lat = (min_lat + max_lat) / 2.0;
-    
+
+    info!("Map center: ({}, {})", center_lat, center_lng);
+
     // Calculate data dimensions
     let data_width = max_lng - min_lng;
     let data_height = max_lat - min_lat;
