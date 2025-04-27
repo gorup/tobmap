@@ -15,7 +15,7 @@ pub mod tobmaprouteapi {
     tonic::include_proto!("tobmaprouteapi");
 }
 use schema::tobmapgraph::{GraphBlob, LocationBlob, DescriptionBlob};
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, Error};
 
 #[derive(Debug)]
 pub struct MyRouteService {
@@ -137,43 +137,63 @@ impl MyRouteService {
         adjacent
     }
 
-    fn find_paths(&self, start_edge_id: u32, end_edge_id: u32, max_paths: usize) -> Vec<(Vec<u32>, Vec<u32>)> {
+    fn find_paths(&self, start_edge_id: u32, end_edge_id: u32, max_paths: usize) -> Result<Vec<(Vec<u32>, Vec<u32>)>, Error> {
         let mut result_paths = Vec::new();
         let mut used_edges = HashSet::new();
 
-        if let Some(shortest_path_info) = self.find_shortest_path(start_edge_id, end_edge_id, &used_edges) {
-            for &edge in &shortest_path_info.0 {
-                used_edges.insert(edge);
-            }
-            result_paths.push(shortest_path_info);
-        } else {
-            return result_paths;
-        }
-
-        for _ in 1..max_paths {
-            if let Some(path_info) = self.find_shortest_path(start_edge_id, end_edge_id, &used_edges) {
-                if path_info.0.is_empty() {
-                    break;
-                }
-                for &edge in &path_info.0 {
+        match self.find_shortest_path(start_edge_id, end_edge_id, &used_edges) {
+            Ok(shortest_path_info) => {
+                for &edge in &shortest_path_info.0 {
                     used_edges.insert(edge);
                 }
-                result_paths.push(path_info);
-            } else {
-                break;
+                result_paths.push(shortest_path_info);
+            }
+            Err(e) => {
+                // If the first path fails, return the error
+                return Err(e);
             }
         }
 
-        result_paths
+
+        for _ in 1..max_paths {
+            match self.find_shortest_path(start_edge_id, end_edge_id, &used_edges) {
+                 Ok(path_info) => {
+                    if path_info.0.is_empty() {
+                        break; // No more paths found
+                    }
+                    for &edge in &path_info.0 {
+                        used_edges.insert(edge);
+                    }
+                    result_paths.push(path_info);
+                }
+                Err(_) => {
+                    // If subsequent path finding fails, we just stop finding more paths
+                    // but still return the paths found so far.
+                    break;
+                }
+            }
+        }
+
+        Ok(result_paths)
     }
 
-    // Returns Option<(edge_path, connecting_node_path)>
-    fn find_shortest_path(&self, start_edge_id: u32, end_edge_id: u32, avoid_edges: &HashSet<u32>) -> Option<(Vec<u32>, Vec<u32>)> {
+    // Returns Result<(edge_path, connecting_node_path), Error>
+    fn find_shortest_path(&self, start_edge_id: u32, end_edge_id: u32, avoid_edges: &HashSet<u32>) -> Result<(Vec<u32>, Vec<u32>), Error> {
         info!("Finding shortest path from {} to {}", start_edge_id, end_edge_id);
-        let graph_data = self.graph_data.as_ref()?;
-        let graph_blob = flatbuffers::root::<GraphBlob>(graph_data).ok()?;
+        let graph_data = self.graph_data.as_ref().context("Graph data not loaded")?;
 
-        let edges = graph_blob.edges()?;
+        let verifier_opts = flatbuffers::VerifierOptions {
+            max_tables: 3_000_000_000, // 3 billion tables
+            ..Default::default()
+        };
+
+        // Verify the buffer structure but don't store the root
+        let graph_blob = flatbuffers::root_with_opts::<GraphBlob>(&verifier_opts, graph_data)
+            .with_context(|| "Failed to parse/verify graph data from buffer")?;
+
+        // let graph_blob = flatbuffers::root::<GraphBlob>(graph_data).context("Failed to parse graph data")?;
+
+        let edges = graph_blob.edges().context("Edges data missing in graph")?;
 
         let mut distances: HashMap<u32, u32> = HashMap::new();
         let mut prev_info: HashMap<u32, (u32, u32)> = HashMap::new();
@@ -185,9 +205,9 @@ impl MyRouteService {
         info!("Starting Dijkstra's algorithm");
 
         while let Some((Reverse(cost), current_edge)) = pq.pop() {
-            info!("Visiting edge {} with cost {}", current_edge, cost);
+            // info!("Visiting edge {} with cost {}", current_edge, cost);
             if current_edge == end_edge_id {
-                return Some(self.reconstruct_path(start_edge_id, end_edge_id, &prev_info));
+                return Ok(self.reconstruct_path(start_edge_id, end_edge_id, &prev_info));
             }
 
             if let Some(&best_cost) = distances.get(&current_edge) {
@@ -230,7 +250,7 @@ impl MyRouteService {
 
         info!("No path found from {} to {}", start_edge_id, end_edge_id);
 
-        None
+        Err(anyhow::anyhow!("No path found from {} to {}", start_edge_id, end_edge_id))
     }
 
     fn reconstruct_path(&self, start_edge_id: u32, end_edge_id: u32, prev_info: &HashMap<u32, (u32, u32)>) -> (Vec<u32>, Vec<u32>) {
@@ -275,7 +295,8 @@ impl RouteService for MyRouteService {
         let end_edge_id = req.end_edge_idx;
 
         let num_paths = 3;
-        let paths_info = self.find_paths(start_edge_id, end_edge_id, num_paths);
+        let paths_info = self.find_paths(start_edge_id, end_edge_id, num_paths)
+            .map_err(|e| Status::internal(format!("Failed to find paths: {}", e)))?;
 
         let result_paths = paths_info.into_iter()
             .map(|(edge_path, node_path)| RoutePath { edges: edge_path, nodes: node_path })
