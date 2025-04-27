@@ -7,9 +7,19 @@ tobmap
 
 - Now another 2-3hrs
 
+### Graphbuild
+
 ```
 cargo run --release --bin graphbuild -- ~/Downloads/washington-latest.osm.pbf outputs/walatest_graph.fb outputs/walatest_location.fb outputs/walatest_description.fb
 ```
+
+### Snap Build
+
+```
+cargo run --release --bin snapbuild -- \-g outputs/walatest_graph.fb -l outputs/walatest_location.fb
+```
+
+### Graphviz
 
 ```
 cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --location outputs/walatest.graph.location.fb --output png.png
@@ -19,15 +29,11 @@ cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --locati
  cargo run --release --bin graphviz -- --graph outputs/walatest.graph.pb --location outputs/walatest.graph.location.fb --output png.png --center-lat=47.814204 --center-lng=-119.045459 --zoom-meters=30000 --edge-width=5 --node-size=2
 ```
 
-```
-cargo run --release --bin server -- -s outputs/snapbuckets
-```
+
+### Server
 
 ```
-{
-  "lat": 47.7283315,
-  "lng": -119.2441248
-}
+cargo run --release --bin server -- -s outputs/snapbuckets -g outputs/walatest_graph.fb
 ```
 
 Crazy!
