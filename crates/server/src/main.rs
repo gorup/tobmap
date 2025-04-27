@@ -17,7 +17,7 @@ struct Args {
     snapbuckets_dir: PathBuf,
 
     /// Path to the graph blob file
-    #[clap(long)]
+    #[clap(short, long)]
     graph_path: PathBuf,
 
     /// Outer cell level for S2 cells

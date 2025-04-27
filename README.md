@@ -37,3 +37,33 @@ Crazy!
 - I said to make a blob where we have more info about the edges and their points, but it still only grabbed start and end even though we had all of the intermediate point data available (curved roads are just sequences of points)
 - For snapping, 2 levels, outer is for a file, inner is within a file so you can quickly get to a L8 cell, then within that L8 cell we have the cell ids and their locations - it used the L8 Cell id for all edges within that cell for some reason!
 - could NOT figure out tiling haha, either stretched or centered w/ tons of whitespace
+
+
+## Requests
+
+Snap: my house, result edge: `640909`
+
+```
+{
+  "lat": 47.66402050260777,
+  "lng": -122.33892695814653
+}
+```
+
+Snap: work, result edge: `686615`
+
+```
+{
+  "lat": 47.64900906111412,
+  "lng":  -122.35073491444791
+}
+```
+
+Route Request
+
+```
+{
+  "startEdgeIdx": 640909,
+  "endEdgeIdx": 686615
+}
+```
