@@ -50,8 +50,8 @@ function initScene() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.rotateSpeed = 0.2;
-    controls.minDistance = 3;
-    controls.maxDistance = 10;
+    controls.minDistance = 2.001; // Zoom level 10 (closest, ~1 mile view)
+    controls.maxDistance = 3.1;  // Zoom level 1 (farthest, ~2500 mile view)
     controls.enableZoom = false; // Disable scroll zoom
 
     // Add button listeners
@@ -66,6 +66,7 @@ function initScene() {
     
     // Load initial tiles
     updateVisibleTiles();
+    updateS2CellInfo(); // Initial S2 cell update
 }
 
 // Animation loop
@@ -101,17 +102,34 @@ function zoomOut() {
 function updateZoom() {
     document.getElementById('current-zoom').textContent = zoomLevel;
     
-    // Adjust camera distance based on new zoom level
-    // Map zoom level 1-10 back to distance 3-10
-    const newDistance = 3 + (10 - zoomLevel) * (10 - 3) / 9;
+    // Adjust camera distance based on new zoom level using an exponential scale
+    // Zoom level 1 (farthest) corresponds to maxDistance, Zoom level 10 (closest) corresponds to minDistance
+    const minD = controls.minDistance; // e.g., 2.001
+    const maxD = controls.maxDistance; // e.g., 3.1
+    const maxZoomLevel = 10;
+    const minZoomLevel = 1;
+    const zoomRange = maxZoomLevel - minZoomLevel; // e.g., 9
+    
+    // Calculate constants for d(zoom) = a * exp(b * zoom)
+    // We want d(minZoomLevel) = maxD and d(maxZoomLevel) = minD
+    // maxD = a * exp(b * minZoomLevel)
+    // minD = a * exp(b * maxZoomLevel)
+    // maxD / minD = exp(b * (minZoomLevel - maxZoomLevel)) = exp(b * -zoomRange)
+    // b = -Math.log(maxD / minD) / zoomRange
+    // a = maxD / Math.exp(b * minZoomLevel)
+    const b = -Math.log(maxD / minD) / zoomRange;
+    const a = maxD / Math.exp(b * minZoomLevel);
+    
+    const newDistance = a * Math.exp(b * zoomLevel);
     
     // Animate camera zoom smoothly (optional, but nice)
     // Get current camera direction
     const direction = new THREE.Vector3();
     camera.getWorldDirection(direction);
     
-    // Calculate new position along the direction vector
-    const newPosition = direction.multiplyScalar(-newDistance).add(controls.target);
+    // Calculate new position along the direction vector from the target
+    const target = controls.target; // Usually the center (0,0,0)
+    const newPosition = direction.multiplyScalar(-newDistance).add(target);
     
     // Use GSAP or Tween.js for smooth animation, or just set position directly
     // Simple direct set for now:
@@ -121,25 +139,45 @@ function updateZoom() {
     controls.update(); 
     
     updateVisibleTiles();
+    updateS2CellInfo(); // Update S2 cell info after zoom
 }
 
 // Update S2 cell info in the UI
 function updateS2CellInfo() {
-    // Get the direction the camera is looking at
-    const cameraDirection = new THREE.Vector3(0, 0, -1);
-    cameraDirection.applyQuaternion(camera.quaternion);
+    // Get the direction the camera is looking at (from camera towards target)
+    const cameraDirection = new THREE.Vector3();
+    camera.getWorldDirection(cameraDirection); 
     
-    // Convert direction to a point on the sphere
-    const sphereIntersection = calculateSphereIntersection(cameraDirection);
-    
-    if (sphereIntersection) {
-        // Convert 3D point to lat/lng
-        const lat = Math.asin(sphereIntersection.y / 2) * (180 / Math.PI);
-        const lng = Math.atan2(sphereIntersection.x, sphereIntersection.z) * (180 / Math.PI);
+    // Raycast from camera position in the view direction to find the center point on the sphere
+    const raycaster = new THREE.Raycaster(camera.position, cameraDirection);
+    const intersects = raycaster.intersectObject(sphere);
+
+    if (intersects.length > 0) {
+        const intersectionPoint = intersects[0].point;
+        // Convert 3D intersection point to lat/lng
+        const radius = sphere.geometry.parameters.radius; // Use actual sphere radius (should be 2)
         
+        // Inverse calculation based on latLngToPoint function:
+        // y = R * cos(phi) => phi = acos(y/R)
+        // lat = 90 - phi * 180/PI
+        const phi = Math.acos(intersectionPoint.y / radius);
+        const lat = 90.0 - (phi * 180.0 / Math.PI);
+        
+        // tan(theta) = z / (-x) => theta = atan2(z, -x)
+        // lng = theta * 180/PI - 180
+        const theta = Math.atan2(intersectionPoint.z, -intersectionPoint.x);
+        let lng = (theta * 180.0 / Math.PI) - 180.0;
+
+        // Normalize lng to [-180, 180]
+        lng = (lng + 180) % 360 - 180; // More robust normalization
+        if (lng === -180) lng = 180; // Handle boundary case
+
         // Get S2 cell at current zoom level
         const s2Cell = S2.latLngToS2(lat, lng, zoomLevel);
         document.getElementById('current-s2-cell').textContent = s2Cell;
+    } else {
+        // If camera doesn't point at sphere (e.g., looking away)
+        document.getElementById('current-s2-cell').textContent = '-';
     }
 }
 
