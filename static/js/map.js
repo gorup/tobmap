@@ -52,8 +52,13 @@ function initScene() {
     controls.rotateSpeed = 0.2;
     controls.minDistance = 3;
     controls.maxDistance = 10;
+    controls.enableZoom = false; // Disable scroll zoom
+
+    // Add button listeners
+    document.getElementById('zoom-in').addEventListener('click', zoomIn);
+    document.getElementById('zoom-out').addEventListener('click', zoomOut);
     
-    // Listen for zoom changes
+    // Listen for control changes (pan/rotate)
     controls.addEventListener('change', onControlsChange);
     
     // Start animation loop
@@ -70,24 +75,52 @@ function animate() {
     renderer.render(scene, camera);
 }
 
-// Update the display based on controls changes
+// Update the display based on controls changes (pan/rotate only)
 function onControlsChange() {
-    // Calculate zoom level based on camera distance
-    const distance = camera.position.distanceTo(new THREE.Vector3(0, 0, 0));
-    
-    // Map distance to zoom level 1-10 (10 levels)
-    // Distance range is from minDistance (3) to maxDistance (10)
-    const calculatedZoomLevel = Math.min(10, Math.max(1, Math.round(11 - (distance - 3) / (10 - 3) * 9)));
-    
-    // Only update if zoom level changed
-    if (calculatedZoomLevel !== zoomLevel) {
-        zoomLevel = calculatedZoomLevel;
-        document.getElementById('current-zoom').textContent = zoomLevel;
-        updateVisibleTiles();
-    }
-    
     // Update S2 cell info based on camera direction
     updateS2CellInfo();
+}
+
+// Zoom In function
+function zoomIn() {
+    if (zoomLevel < 10) {
+        zoomLevel++;
+        updateZoom();
+    }
+}
+
+// Zoom Out function
+function zoomOut() {
+    if (zoomLevel > 1) {
+        zoomLevel--;
+        updateZoom();
+    }
+}
+
+// Update zoom level display and camera distance
+function updateZoom() {
+    document.getElementById('current-zoom').textContent = zoomLevel;
+    
+    // Adjust camera distance based on new zoom level
+    // Map zoom level 1-10 back to distance 3-10
+    const newDistance = 3 + (10 - zoomLevel) * (10 - 3) / 9;
+    
+    // Animate camera zoom smoothly (optional, but nice)
+    // Get current camera direction
+    const direction = new THREE.Vector3();
+    camera.getWorldDirection(direction);
+    
+    // Calculate new position along the direction vector
+    const newPosition = direction.multiplyScalar(-newDistance).add(controls.target);
+    
+    // Use GSAP or Tween.js for smooth animation, or just set position directly
+    // Simple direct set for now:
+    camera.position.copy(newPosition);
+    
+    // Update controls target if needed (usually center of sphere)
+    controls.update(); 
+    
+    updateVisibleTiles();
 }
 
 // Update S2 cell info in the UI

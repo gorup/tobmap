@@ -294,7 +294,7 @@ impl RouteService for MyRouteService {
         let start_edge_id = req.start_edge_idx;
         let end_edge_id = req.end_edge_idx;
 
-        let num_paths = 3;
+        let num_paths = 1;
         let paths_info = self.find_paths(start_edge_id, end_edge_id, num_paths)
             .map_err(|e| Status::internal(format!("Failed to find paths: {}", e)))?;
 

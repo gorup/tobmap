@@ -40,3 +40,14 @@ h1 {
     margin-top: 5px;
     font-size: 0.9rem;
 }
+
+#zoom-controls {
+    margin-top: 5px;
+}
+
+#zoom-controls button {
+    padding: 2px 6px;
+    font-size: 1rem;
+    margin: 0 2px;
+    cursor: pointer;
+}
