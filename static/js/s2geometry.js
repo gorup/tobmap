@@ -103,4 +103,20 @@ class S2 {
         
         return vertices;
     }
+
+    // Placeholder: Convert S2 cell ID (uint64) back to approximate Lat/Lng
+    // A real implementation would use the S2 library's decoding functions.
+    static cellIdToLatLng(cellId) {
+        // Extremely simplified placeholder based on the ID's numerical value
+        // This will NOT produce correct geographical locations.
+        const randomFactor = (parseInt(cellId.toString().slice(-6)) / 1000000) - 0.5; // Pseudo-randomness
+        const lat = (cellId % 180) - 90 + randomFactor * 10;
+        const lng = (cellId % 360) - 180 + randomFactor * 20;
+        
+        // Clamp values to valid ranges
+        const clampedLat = Math.max(-90, Math.min(90, lat));
+        const clampedLng = Math.max(-180, Math.min(180, lng));
+
+        return { lat: clampedLat, lng: clampedLng };
+    }
 }

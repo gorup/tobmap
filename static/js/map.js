@@ -2,6 +2,9 @@
  * Main map application script
  */
 
+// Assuming protobuf definitions are available globally (e.g., via script tag)
+const { S2CellData, Vertex, Edge } = proto.tobmapdata;
+
 // Global variables
 let scene, camera, renderer, controls;
 let sphere;
@@ -307,62 +310,94 @@ function renderPlaceholderCell(cellId) {
 
 // Render a vector tile with actual data
 function renderVectorTile(cellId, data) {
-    // In a real application, you would parse the protobuf data
-    // For this demo, we'll just render a placeholder with a different color
-    
-    const vertices = S2.getCellBoundary(cellId);
-    
-    if (vertices.length === 0) return;
-    
-    // Create a geometry for the cell
-    const geometry = new THREE.BufferGeometry();
-    const positionArray = [];
-    
-    // Convert lat/lng to 3D coordinates and create faces
-    for (let i = 0; i < vertices.length; i++) {
-        const vertex = vertices[i];
-        const point = latLngToPoint(vertex.lat, vertex.lng);
-        positionArray.push(point.x, point.y, point.z);
+    // Ensure protobuf definitions are loaded
+    if (typeof proto === 'undefined' || !proto.tobmapdata || !proto.tobmapdata.S2CellData) {
+        console.error("Protobuf definitions (proto.tobmapdata) not loaded.");
+        renderPlaceholderCell(cellId); // Fallback to placeholder
+        return;
     }
     
-    // Create a polygon
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positionArray, 3));
-    
-    // Calculate face normals
-    geometry.computeVertexNormals();
-    
-    // Create a material with a color based on the cell ID
-    const hashCode = cellId.split('').reduce((a, b) => {
-        a = ((a << 5) - a) + b.charCodeAt(0);
-        return a & a;
-    }, 0);
-    
-    const color = new THREE.Color(Math.abs(hashCode) % 0xffffff);
-    
-    const material = new THREE.MeshPhongMaterial({ 
-        color: color,
-        transparent: true,
-        opacity: 0.7,
-        side: THREE.DoubleSide
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    
-    // Add a wireframe to highlight the boundaries
-    const wireframe = new THREE.LineSegments(
-        new THREE.WireframeGeometry(geometry),
-        new THREE.LineBasicMaterial({
-            color: 0xffffff,
-            linewidth: 1,
-            transparent: true,
-            opacity: 0.5
-        })
-    );
-    
+    let tileData;
+    try {
+        tileData = proto.tobmapdata.S2CellData.deserializeBinary(data);
+    } catch (error) {
+        console.error("Error deserializing tile data for cell:", cellId, error);
+        renderPlaceholderCell(cellId);
+        return;
+    }
+
     const group = new THREE.Group();
-    group.add(mesh);
-    group.add(wireframe);
+    const verticesMap = new Map(); // Map cellId to LatLng for quick lookup
     
+    // Pre-process vertices (assuming Vertex message just contains cellId)
+    // We need to convert these cell IDs to LatLng.
+    // NOTE: S2.cellIdToLatLng is a placeholder and needs a real implementation.
+    tileData.getVerticesList().forEach((vertex, index) => {
+        const vertexCellId = vertex.getCellId(); // Get the uint64 cell ID
+        // For now, we'll use the placeholder conversion.
+        // In a real scenario, you might already have LatLng or need a proper S2 library function.
+        const latLng = S2.cellIdToLatLng(vertexCellId); 
+        verticesMap.set(index, latLng); // Store LatLng by index
+    });
+
+    // Render Edges
+    tileData.getEdgesList().forEach(edge => {
+        const pointsList = edge.getPointsList(); // List of vertex indices
+        const priority = edge.getPriority();
+        const isOneway = edge.getIsOneway();
+        // const streetNames = edge.getStreetNamesList(); // TODO: Render street names
+
+        if (pointsList.length < 2) return; // Need at least two points for a line
+
+        const edgePoints3D = [];
+        for (const vertexIndex of pointsList) {
+            const latLng = verticesMap.get(vertexIndex);
+            if (latLng) {
+                const point3D = latLngToPoint(latLng.lat, latLng.lng);
+                // Slightly offset points outwards to avoid z-fighting with the sphere
+                point3D.multiplyScalar(1.001); 
+                edgePoints3D.push(point3D);
+            } else {
+                console.warn(`Vertex index ${vertexIndex} not found in vertices map for edge.`);
+                // Skip this edge or handle error appropriately
+                return; 
+            }
+        }
+
+        const geometry = new THREE.BufferGeometry().setFromPoints(edgePoints3D);
+        
+        // Determine line width based on priority (example scaling)
+        const lineWidth = Math.max(1, 5 / (priority + 1)); // Thicker for lower priority number (e.g., 0 is thickest)
+
+        let material;
+        if (isOneway) {
+            material = new THREE.LineDashedMaterial({
+                color: 0x00ff00, // Green for oneway
+                linewidth: lineWidth,
+                scale: 1,
+                dashSize: 0.05, // Length of dashes
+                gapSize: 0.03,  // Length of gaps
+            });
+        } else {
+            material = new THREE.LineBasicMaterial({ 
+                color: 0xffffff, // White for normal roads
+                linewidth: lineWidth 
+            });
+        }
+
+        const line = new THREE.Line(geometry, material);
+        
+        // Required for dashed lines
+        if (isOneway) {
+            line.computeLineDistances();
+        }
+
+        group.add(line);
+        
+        // TODO: Render street names (e.g., using TextGeometry or Sprites)
+    });
+
+    // Add the group containing all lines for this tile to the sphere
     sphere.add(group);
     loadedTiles[cellId] = group;
 }
