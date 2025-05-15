@@ -57,11 +57,11 @@ struct Args {
     #[arg(long)]
     zoom_meters: Option<f64>,
 
-    /// Index of an edge to highlight and log details for
+    /// Comma-separated list of edge indices to highlight and log details for (e.g. "1,2,3")
     #[arg(long)]
-    highlight_edge_index: Option<u32>,
+    highlight_edge_indices: Option<String>,
 
-    /// Width for the highlighted edge (defaults to edge_width * 2 if not set)
+    /// Width for the highlighted edges (defaults to edge_width * 2 if not set)
     #[arg(long)]
     highlight_edge_width: Option<f32>,
 }
@@ -117,6 +117,13 @@ fn main() -> Result<()> {
     let description = flatbuffers::root_with_opts::<DescriptionBlob>(&verifier_opts, &description_buffer)
         .with_context(|| "Failed to parse description data from buffer")?;
 
+    // Parse comma-separated edge indices if provided
+    let highlight_edge_indices = args.highlight_edge_indices.map(|s| {
+        s.split(',')
+            .filter_map(|index| index.trim().parse::<u32>().ok())
+            .collect::<Vec<_>>()
+    });
+
     // Create VizConfig from Args
     let config = VizConfig {
         max_size: args.max_size,
@@ -126,7 +133,7 @@ fn main() -> Result<()> {
         center_lat: args.center_lat,
         center_lng: args.center_lng,
         zoom_meters: args.zoom_meters,
-        highlight_edge_index: args.highlight_edge_index,
+        highlight_edge_indices,
         highlight_edge_width: args.highlight_edge_width,
         tile: None, // Not using tiling in this example
     };

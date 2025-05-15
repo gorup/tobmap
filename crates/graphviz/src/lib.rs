@@ -49,7 +49,7 @@ pub struct VizConfig {
     pub center_lat: Option<f64>,
     pub center_lng: Option<f64>,
     pub zoom_meters: Option<f64>,
-    pub highlight_edge_index: Option<u32>,
+    pub highlight_edge_indices: Option<Vec<u32>>,  // Changed from highlight_edge_index
     pub highlight_edge_width: Option<f32>,
     pub tile: Option<TileConfig>, // New field for tiling configuration
 }
@@ -698,7 +698,7 @@ pub fn render_tile(
     // Get base configuration values
     let node_size = config.node_size;
     let base_edge_width = config.edge_width;
-    let highlight_edge_index = config.highlight_edge_index;
+    let highlight_edge_indices = &config.highlight_edge_indices;  // Changed from highlight_edge_index
     let highlight_edge_width = config.highlight_edge_width;
     let show_labels = config.show_labels;
 
@@ -814,8 +814,10 @@ pub fn render_tile(
             continue; // Skip edges not visible in this tile
         }
 
-        // Determine if this is the highlighted edge
-        let is_highlighted = highlight_edge_index.map_or(false, |idx| i == idx as usize);
+        // Determine if this is a highlighted edge
+        let is_highlighted = highlight_edge_indices
+            .as_ref()
+            .map_or(false, |indices| indices.contains(&(i as u32)));
 
         // Set edge color and width
         let color = if is_highlighted { yellow } else { props.color };
